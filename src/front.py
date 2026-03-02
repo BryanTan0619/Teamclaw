@@ -483,7 +483,8 @@ HTML_TEMPLATE = """
         .orch-expert-card:hover { border-color: #2563eb; background: #eff6ff; }
         .orch-expert-card:active { cursor: grabbing; }
         .orch-expert-card .orch-emoji { font-size: 18px; }
-        .orch-expert-card .orch-name { font-weight: 500; color: #374151; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .orch-expert-card .orch-name { font-weight: 500; color: #374151; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+        .orch-expert-card:hover .orch-name { white-space: normal; word-break: break-all; }
         .orch-expert-card .orch-tag { font-size: 10px; color: #9ca3af; }
         .orch-expert-card .orch-temp { font-size: 10px; color: #059669; background: #ecfdf5; padding: 1px 5px; border-radius: 4px; }
         .orch-manual-card {
@@ -4784,7 +4785,7 @@ orch_openclaw_sessions: '🦞 OpenClaw',
             card.className = 'orch-expert-card';
             card.draggable = true;
             const isCustom = exp.source === 'custom';
-            card.innerHTML = `<span class="orch-emoji">${exp.emoji}</span><div style="min-width:0;flex:1;"><div class="orch-name">${escapeHtml(exp.name)}</div><div class="orch-tag">${escapeHtml(exp.tag)}</div></div><span class="orch-temp">${exp.temperature||''}</span>${isCustom ? '<button class="orch-expert-del-btn" title="' + t('orch_ctx_delete') + '" style="font-size:10px;background:none;border:none;cursor:pointer;color:#dc2626;padding:0 2px;margin-left:2px;">✕</button>' : ''}`;
+            card.innerHTML = `<span class="orch-emoji">${exp.emoji}</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(exp.name)}">${escapeHtml(exp.name)}</div><div class="orch-tag">${escapeHtml(exp.tag)}</div></div><span class="orch-temp">${exp.temperature||''}</span>${isCustom ? '<button class="orch-expert-del-btn" title="' + t('orch_ctx_delete') + '" style="font-size:10px;background:none;border:none;cursor:pointer;color:#dc2626;padding:0 2px;margin-left:2px;">✕</button>' : ''}`;
             card.addEventListener('dragstart', e => {
                 e.dataTransfer.setData('application/json', JSON.stringify({type:'expert', ...exp}));
                 e.dataTransfer.effectAllowed = 'copy';
@@ -4829,7 +4830,7 @@ orch_openclaw_sessions: '🦞 OpenClaw',
                 card.className = 'orch-expert-card';
                 card.draggable = true;
                 const title = s.title || 'Untitled';
-                card.innerHTML = `<span class="orch-emoji">🤖</span><div style="min-width:0;flex:1;"><div class="orch-name">${escapeHtml(title)}</div><div class="orch-tag" style="color:#6366f1;font-family:monospace;">#${s.session_id.slice(-8)}</div></div><span class="orch-temp" style="font-size:9px;color:#9ca3af;">${s.message_count||0}msg</span>`;
+                card.innerHTML = `<span class="orch-emoji">🤖</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(title)}">${escapeHtml(title)}</div><div class="orch-tag" style="color:#6366f1;font-family:monospace;">#${s.session_id.slice(-8)}</div></div><span class="orch-temp" style="font-size:9px;color:#9ca3af;">${s.message_count||0}msg</span>`;
                 const sessionData = {type:'session_agent', name: title, tag: 'session', emoji:'🤖', temperature: 0.7, session_id: s.session_id};
                 card.addEventListener('dragstart', e => {
                     e.dataTransfer.setData('application/json', JSON.stringify(sessionData));
@@ -4867,7 +4868,10 @@ orch_openclaw_sessions: '🦞 OpenClaw',
                 card.className = 'orch-expert-card';
                 card.draggable = true;
                 const title = s.key || 'Untitled';
-                card.innerHTML = `<span class="orch-emoji">🦞</span><div style="min-width:0;flex:1;"><div class="orch-name">${escapeHtml(title)}</div><div class="orch-tag" style="color:#10b981;font-family:monospace;">${s.channel||'unknown'} · ${s.model||''}</div></div><span class="orch-temp" style="font-size:9px;color:#9ca3af;">${s.contextTokens||0}tk</span>`;
+                const chan = (s.channel && s.channel !== 'unknown' && s.channel !== 'auto') ? s.channel : '';
+                const mdl = (s.model && s.model !== 'unknown' && s.model !== 'auto') ? s.model : '';
+                const tagParts = [chan, mdl].filter(Boolean).join(' · ');
+                card.innerHTML = `<span class="orch-emoji">🦞</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(title)}">${escapeHtml(title)}</div>${tagParts ? '<div class="orch-tag" style="color:#10b981;font-family:monospace;">' + escapeHtml(tagParts) + '</div>' : ''}</div><span class="orch-temp" style="font-size:9px;color:#9ca3af;">${s.contextTokens||0}tk</span>`;
                 // s.key is already in full format like "agent:main:sessionName"
                 const sessionKey = s.key || 'default';
                 const modelStr = sessionKey.startsWith('agent:') ? sessionKey : ('agent:main:' + sessionKey);
