@@ -540,3 +540,4 @@ bash selfskill/scripts/run.sh stop
 - 日志路径: `logs/launcher.log`
 
 - 一定要告诉用户如何开启可视化界面，以及如何登录到进行讨论等工作的账号
+- openclaw session file路径可以综合案例路径和当前skill路径推理得到。假如你是openclaw agent，一定要人类完成完整的openclaw相关配置
