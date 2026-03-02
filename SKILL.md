@@ -1,14 +1,586 @@
 ---
 name: TeamClaw
-description:
-  A high-performance Agent subsystem designed for complex multi-agent orchestration (OASIS),automated computer use tasks, and real-time visual monitoring via a dedicated Web UI.
+description: A high-performance Agent subsystem designed for complex multi-agent orchestration (OASIS),visual multi-agent workflow orchestration, automated computer use tasks, and real-timevisual monitoring via a dedicated Web UI. Supports multi-vendor LLM backends(DeepSeek / OpenAI / Gemini / Claude etc.), social platform bot integrations (Telegram, QQ),and optional Cloudflare Tunnel for secure HTTPS public access to the Web UI from mobileor remote devices.
+user-invokable: true
+compatibility:
+  - deepseek
+  - openai
+  - gemini
+  - claude
+  - anthropic
+  - ollama
+argument-hint: "Required: LLM_API_KEY. Optional: LLM_BASE_URL (default https://api.deepseek.com), LLM_MODEL (default deepseek-chat), LLM_PROVIDER (google/anthropic/deepseek/openai, auto-inferred), LLM_VISION_SUPPORT (auto-inferred), TTS_MODEL, TTS_VOICE, OPENAI_STANDARD_MODE (default false), PORT_AGENT (51200), PORT_SCHEDULER (51201), PORT_OASIS (51202), PORT_FRONTEND (51209), PORT_BARK (58010), INTERNAL_TOKEN (auto-generated), ALLOWED_COMMANDS, EXEC_TIMEOUT (30), MAX_OUTPUT_LENGTH (8000), TELEGRAM_BOT_TOKEN, QQ_APP_ID, QQ_BOT_SECRET, QQ_BOT_USERNAME (default qquser), AI_API_URL, AI_MODEL_QQ, AI_MODEL_TG, OPENCLAW_SESSIONS_FILE, OPENCLAW_API_URL, OPENCLAW_API_KEY. Auth methods: user password (Authorization: Bearer user_id:password), internal token (Authorization: Bearer INTERNAL_TOKEN:user_id, auto-generated on first startup), chatbot whitelist (TG/QQ bots via INTERNAL_TOKEN + whitelist). Cloudflare Tunnel: PUBLIC_DOMAIN and BARK_PUBLIC_URL auto-set by tunnel script for secure HTTPS public access."
+metadata:
+  version: "1.0"
+  github: "https://github.com/Avalon-467/Teamclaw"
+  ports:
+    agent: 51200
+    scheduler: 51201
+    oasis: 51202
+    frontend: 51209
+    bark: 58010
+  auth_methods:
+    - user_password
+    - internal_token
+    - chatbot_whitelist
+  integrations:
+    - openclaw
+    - telegram
+    - qq
+    - cloudflare_tunnel
 ---
 
-# TeamClaw — Agent 子系统 Skill
+# TeamClaw — Agent Subsystem Skill
 
-** 如果你是openclaw agent，请将自己作为Teamclaw的外部agent**
+https://github.com/Avalon-467/Teamclaw
+
+
+## Introduction
+
+TeamClaw is an OpenClaw-like multi-agent sub-platform with a built-in lightweight agent (similar to OpenClaw's), featuring computer use capabilities and social platform integrations (e.g., Telegram). It can run independently without blocking the main agent, or be directly controlled by an OpenClaw agent to orchestrate the built-in OASIS collaboration platform. It also supports exposing the frontend to the public internet via Cloudflare, enabling remote visual multi-agent workflow programming from mobile devices or any browser.
+
+TeamClaw is a versatile AI Agent service providing:
+
+- **Conversational Agent**: A LangGraph-based multi-tool AI assistant supporting streaming/non-streaming conversations
+- **OASIS Forum**: A multi-expert parallel discussion/execution engine for orchestrating multiple agents
+- **Scheduled Tasks**: An APScheduler-based task scheduling center
+- **Bark Push**: Mobile push notifications
+- **Frontend Web UI**: A complete chat interface
+
+## Skill Scripts
+
+All scripts are located in `selfskill/scripts/`, invoked uniformly via the `run.sh` entry point, **all non-interactive**.
+
+```
+selfskill/scripts/
+├── run.sh          # Main entry (start/stop/status/setup/add-user/configure)
+├── adduser.py      # Non-interactive user creation
+└── configure.py    # Non-interactive .env configuration management
+```
+
+## Quick Start
+
+All commands are executed in the project root directory.
+
+### 1. First Deployment
+
+```bash
+# Install dependencies
+bash selfskill/scripts/run.sh setup
+
+# Initialize configuration file
+bash selfskill/scripts/run.sh configure --init
+
+# Configure LLM (required)
+bash selfskill/scripts/run.sh configure --batch \
+  LLM_API_KEY=sk-your-key \
+  LLM_BASE_URL=https://api.deepseek.com \
+  LLM_MODEL=deepseek-chat
+
+# Create user
+bash selfskill/scripts/run.sh add-user system MySecurePass123
+```
+
+### 2. Start / Stop / Status
+
+```bash
+bash selfskill/scripts/run.sh start     # Start in background
+bash selfskill/scripts/run.sh status    # Check status
+bash selfskill/scripts/run.sh stop      # Stop service
+```
+
+### 3. Configuration Management
+
+```bash
+# View current configuration (sensitive values masked)
+bash selfskill/scripts/run.sh configure --show
+
+# Set a single item
+bash selfskill/scripts/run.sh configure PORT_AGENT 51200
+
+# Batch set
+bash selfskill/scripts/run.sh configure --batch TTS_MODEL=gemini-2.5-flash-preview-tts TTS_VOICE=charon
+```
+
+## Configuration Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `LLM_API_KEY` | LLM API key (**required**) | — |
+| `LLM_BASE_URL` | LLM API URL | `https://api.deepseek.com` |
+| `LLM_MODEL` | Model name | `deepseek-chat` |
+| `LLM_PROVIDER` | Provider (google/anthropic/deepseek/openai, auto-inferred) | Auto |
+| `LLM_VISION_SUPPORT` | Vision support (auto-inferred) | Auto |
+| `PORT_AGENT` | Agent main service port | `51200` |
+| `PORT_SCHEDULER` | Scheduled task port | `51201` |
+| `PORT_OASIS` | OASIS forum port | `51202` |
+| `PORT_FRONTEND` | Web UI port | `51209` |
+| `PORT_BARK` | Bark push port | `58010` |
+| `TTS_MODEL` | TTS model (optional) | — |
+| `TTS_VOICE` | TTS voice (optional) | — |
+| `OPENCLAW_API_URL` | OpenClaw backend service URL (full path, including `/v1/chat/completions`) | `http://127.0.0.1:18789/v1/chat/completions` |
+| `OPENCLAW_API_KEY` | OpenClaw backend service API key (optional) | — |
+| `OPENCLAW_SESSIONS_FILE` | Absolute path to OpenClaw sessions.json file (**required when using OpenClaw**) | `/projects/.moltbot/agents/main/sessions/sessions.json` |
+| `INTERNAL_TOKEN` | Internal communication secret (auto-generated) | Auto |
+
+## Ports & Services
+
+| Port | Service |
+|------|---------|
+| 51200 | AI Agent main service |
+| 51201 | Scheduled tasks |
+| 51202 | OASIS forum |
+| 51209 | Web UI |
+
+## API Authentication
+
+### Method 1: User Authentication
+
+```
+Authorization: Bearer <user_id>:<password>
+```
+
+### Method 2: Internal Token (for inter-service calls, recommended)
+
+```
+Authorization: Bearer <INTERNAL_TOKEN>:<user_id>
+```
+
+`INTERNAL_TOKEN` is auto-generated on first startup; view it via `configure --show-raw`.
+
+## Core API
+
+**Base URL**: `http://127.0.0.1:51200`
+
+### Chat (OpenAI-compatible)
+
+```
+POST /v1/chat/completions
+Authorization: Bearer <token>
+
+{"model":"mini-timebot","messages":[{"role":"user","content":"Hello"}],"stream":true,"session_id":"my-session"}
+```
+
+### System Trigger (internal call)
+
+```
+POST /system_trigger
+X-Internal-Token: <INTERNAL_TOKEN>
+
+{"user_id":"system","text":"Please execute a task","session_id":"task-001"}
+```
+
+### Cancel Session
+
+```
+POST /cancel
+
+{"user_id":"<user_id>","session_id":"<session_id>"}
+```
+
+
+## OASIS Four Operating Modes (Default: Discussion Mode)
+
+> The "four modes" are two orthogonal switches:
+> - **Discussion vs Execution**: Determines whether expert output is "forum-style discussion/voting" or "workflow-style execution/deliverables".
+> - **Synchronous vs Detach**: Determines whether the caller blocks waiting for results.
+
+### 1) Discussion Mode vs Execution Mode
+
+**Discussion Mode (discussion=true, default)**
+- Purpose: Multiple experts provide different perspectives, pros/cons analysis, clarify disputes, and can form consensus.
+- Use case: Solution reviews, technical route selection, questions that need "why".
+
+**Execution Mode (discussion=false)**
+- Purpose: Use OASIS as an orchestrator to complete tasks in planned sequential/parallel order, emphasizing direct output (code/scripts/checklists/finalized plans).
+- Use case: Delivery tasks with clear objectives that don't need debate.
+
+### 2) Synchronous Mode vs Detach Mode
+
+**Synchronous (detach=false, default)**
+- Behavior: After calling `post_to_oasis`, waits for completion and returns the final result directly.
+- Use case: Quick tasks where you need the deliverable immediately to continue iterating.
+
+**Detach (detach=true)**
+- Behavior: Returns `topic_id` immediately, continues running/discussing in the background; later use `check_oasis_discussion(topic_id)` to track progress and results.
+- Use case: Multi-round/multi-expert/long-running/tool-calling tasks where you don't want to block the current session.
+
+### 3) Auto-selection Rules (Recommended Default Strategy)
+
+When not explicitly specified, the following default strategy is recommended:
+
+1. **Default = Discussion + Synchronous**
+   - `discussion=true`
+   - `detach=false`
+
+2. Switch to **Execution Mode** when these signals appear:
+   - "Give me the final version / copy-pasteable / executable script / just conclusions no discussion"
+   - "Generate SOP / checklist / table step by step and finalize"
+
+3. Switch to **Detach Mode** when these signals appear:
+   - "Run in background / I'll check later / just give me the topic_id"
+   - Multi-expert parallel, multi-round (large `max_rounds`), or expected long duration
+
+### 4) Four Combinations Quick Reference
+
+| Combination | Parameters | Returns | Use Case |
+|---|---|---|---|
+| Discussion + Sync (default) | discussion=true, detach=false | See discussion & conclusion on the spot | Decision/review/collect opinions |
+| Discussion + Detach | discussion=true, detach=true | topic_id, check later | Long discussion/multi-round |
+| Execution + Sync | discussion=false, detach=false | Direct deliverables | Generate code/plans/checklists |
+| Execution + Detach | discussion=false, detach=true | topic_id, check later | Long execution/complex pipelines |
+
+
+## OASIS Four Agent Types
+
+OASIS supports **four types of agents**, distinguished by the `name` format in `schedule_yaml`:
+
+| # | Type | Name Format | Engine Class | Description |
+|---|------|-------------|--------------|-------------|
+| 1 | **Direct LLM** | `tag#temp#N` | `ExpertAgent` | Stateless single LLM call. Each round reads all posts → one LLM call → publish + vote. No cross-round memory. `tag` maps to preset expert name/persona, `N` is instance number (same expert can have multiple copies). |
+| 2 | **Oasis Session** | `tag#oasis#id` | `SessionExpert` (oasis) | OASIS-managed stateful bot session. `tag` maps to preset expert, persona injected as system prompt on first round. Bot retains conversation memory across rounds (incremental context). `id` can be any string; new ID auto-creates session on first use. |
+| 3 | **Regular Agent** | `Title#session_id` | `SessionExpert` (regular) | Connects to an existing agent session (e.g., `Assistant#default`, `Coder#my-project`). No identity injection—the session's own system prompt defines the agent. Suitable for bringing personal bot sessions into discussions. |
+| 4 | **External API** | `tag#ext#id` | `ExternalExpert` | Directly calls any OpenAI-compatible external API (DeepSeek, GPT-4, Ollama, another TeamClaw instance, etc.). Does not go through local agent. External service assumed stateful. Supports custom request headers via YAML `headers` field. | Classic use case: connecting to OpenClaw agent |
+
+### Session ID Format
+
+```
+tag#temp#N           → ExpertAgent   (stateless, direct LLM)
+tag#oasis#<id>       → SessionExpert (oasis-managed, stateful bot)
+Title#session_id     → SessionExpert (regular agent session)
+tag#ext#<id>         → ExternalExpert (external API, e.g. OpenClaw agent)
+```
+
+**Special Suffix:**
+- Appending `#new` to the end of any session name forces creation of a **brand new session** (ID replaced with random UUID, ensuring no reuse):
+  - `creative#oasis#abc#new` → `#new` stripped, ID replaced with UUID
+  - `Assistant#my-session#new` → Same processing
+
+**Oasis Session Conventions:**
+- Oasis sessions are identified by `#oasis#` in `session_id` (e.g., `creative#oasis#ab12cd34`)
+- Stored in the regular Agent checkpoint DB (`data/agent_memory.db`), no separate storage
+- Auto-created on first use, no pre-creation needed
+- `tag` part maps to preset expert configuration to find persona
+
+### YAML Example
+
+```yaml
+version: 1
+plan:
+  # Type 1: Direct LLM (stateless, fast)
+  - expert: "creative#temp#1"
+  - expert: "critical#temp#2"
+
+  # Type 2: Oasis session (stateful, with memory)
+  - expert: "data#oasis#analysis01"
+  - expert: "synthesis#oasis#new#new"   # Force new session
+
+  # Type 3: Regular agent session (your existing bot)
+  - expert: "Assistant#default"
+  - expert: "Coder#my-project"
+
+  # Type 4: External API (DeepSeek, GPT-4, etc.)
+  - expert: "deepseek#ext#ds1"
+
+  # Type 4: OpenClaw External API (local Agent service)
+  - expert: "coder#ext#oc1"
+    api_url: "http://127.0.0.1:23001/v1/chat/completions"
+    model: "agent:main:test1"    # agent:<agent_name>:<session>, session auto-created if not exists
+
+  # Parallel execution
+  - parallel:
+      - expert: "creative#temp#1"
+        instruction: "Analyze from innovation perspective"
+      - expert: "critical#temp#2"
+        instruction: "Analyze from risk perspective"
+
+  # All experts speak + manual injection
+  - all_experts: true
+  - manual:
+      author: "Moderator"
+      content: "Please focus on feasibility"
+```
+
+### External API (Type 4) Detailed Configuration
+
+Type 4 external agents support additional configuration fields in YAML steps:
+
+```yaml
+version: 1
+plan:
+  - expert: "Analyst#ext#analyst"
+    api_url: "https://api.deepseek.com"          # Required: External API base URL (auto-completes to /v1/chat/completions)
+    api_key: "sk-xxx"                             # Required: API key → Authorization: Bearer <key>
+    model: "deepseek-chat"                        # Optional: Model name, default gpt-3.5-turbo
+    headers:                                      # Optional: Custom HTTP headers (key-value dict)
+      X-Custom-Header: "value"
+```
+
+**Configuration Field Description:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `api_url` | ✅ | External API address, auto-completes path to `/v1/chat/completions` |
+| `api_key` | ❌ | Placed in `Authorization: Bearer <key>` header |
+| `model` | ❌ | Default `gpt-3.5-turbo` |
+| `headers` | ❌ | Any key-value dict, merged into HTTP request headers |
+
+**OpenClaw-specific Configuration:**
+
+OpenClaw is a locally running OpenAI-compatible Agent service. After setting up OpenClaw-specific endpoints in `.env`, the frontend orchestration panel will **auto-fill** `api_url` and `api_key` when dragging in an OpenClaw expert, no manual input needed:
+
+```bash
+# Configure OpenClaw endpoint and sessions file path
+bash selfskill/scripts/run.sh configure --batch \
+  OPENCLAW_SESSIONS_FILE=/projects/.moltbot/agents/main/sessions/sessions.json \
+  OPENCLAW_API_URL=http://127.0.0.1:18789/v1/chat/completions \
+  OPENCLAW_API_KEY=your-openclaw-key-if-needed
+```
+
+> **⚠️ Note:**
+> - `OPENCLAW_SESSIONS_FILE` is a **prerequisite** for using the OpenClaw feature and must point to the absolute path of OpenClaw's `sessions.json` file. The frontend orchestration panel will not load OpenClaw sessions if unconfigured.
+> - `OPENCLAW_API_URL` should contain the **full path** (including `/v1/chat/completions`); the system will auto-strip the suffix to generate the base URL for YAML. The `api_url` field in YAML only needs the base URL (e.g., `http://127.0.0.1:18789`); the engine auto-completes the path.
+> - If your OpenClaw service runs on a non-default port, be sure to modify these settings.
+
+**OpenClaw `model` Field Format:**
+
+```
+agent:<agent_name>:<session_name>
+```
+
+- `agent_name`: Agent name in OpenClaw, usually `main`
+- `session_name`: Session name, e.g., `test1`, `default`, etc. **You can enter a non-existent session name to auto-create**
+
+Examples:
+- `agent:main:default` — Use main agent's default session
+- `agent:main:test1` — Use main agent's test1 session (auto-created if not exists)
+- `agent:main:code-review` — Use main agent's code-review session
+
+**Request Header Assembly Logic:**
+Final request headers = `Content-Type: application/json` + `Authorization: Bearer <api_key>` (if present) + all key-value pairs from YAML `headers`.
+
+---
+
+## Using OASIS Server Independently
+
+The OASIS Server (port 51202) can be **used independently of the Agent main service**. External scripts, other services, or manual curl can directly operate all OASIS features without going through MCP tools or Agent conversations.
+
+**Independent Use Scenarios:**
+- Initiate multi-expert discussions/executions from external scripts
+- Debug workflow orchestration
+- Integrate OASIS as a microservice into other systems
+- Manage experts, sessions, workflows, and other resources
+
+**Prerequisites:**
+- OASIS service is running (`bash selfskill/scripts/run.sh start` starts all services simultaneously)
+- All endpoints use `user_id` parameter for user isolation (no Authorization header needed)
+
+**API Overview:**
+
+| Function | Method | Path |
+|----------|--------|------|
+| List experts | GET | `/experts?user_id=xxx` |
+| Create custom expert | POST | `/experts/user` |
+| Update/delete custom expert | PUT/DELETE | `/experts/user/{tag}` |
+| List oasis sessions | GET | `/sessions/oasis?user_id=xxx` |
+| Save workflow | POST | `/workflows` |
+| List workflows | GET | `/workflows?user_id=xxx` |
+| YAML → Layout | POST | `/layouts/from-yaml` |
+| Create discussion/execution | POST | `/topics` |
+| View discussion details | GET | `/topics/{topic_id}?user_id=xxx` |
+| Get conclusion (blocking) | GET | `/topics/{topic_id}/conclusion?user_id=xxx&timeout=300` |
+| SSE real-time stream | GET | `/topics/{topic_id}/stream?user_id=xxx` |
+| Cancel discussion | DELETE | `/topics/{topic_id}?user_id=xxx` |
+| List all topics | GET | `/topics?user_id=xxx` |
+
+> These endpoints share the same backend implementation as MCP tools, ensuring consistent behavior.
+
+---
+
+### OASIS Discussion/Execution
+
+```
+POST http://127.0.0.1:51202/topics
+
+{"question":"Discussion topic","user_id":"system","max_rounds":3,"discussion":true,"schedule_file":"...","schedule_yaml":"...","callback_url":"http://127.0.0.1:51200/system_trigger","callback_session_id":"my-session"}
+```
+
+Prefer using schedule_yaml to avoid repeated YAML input; this is the absolute path to the YAML workflow file, usually under /XXXXX/TeamClaw/data/user_files/username.
+
+### Externally Participating in OASIS Server via curl (Complete Methods)
+
+The OASIS Server (port 51202), in addition to being called by MCP tools, also supports direct curl operations for external scripts or debugging. All endpoints use `user_id` parameter for user isolation.
+
+#### 1. Expert Management
+```bash
+# List all experts (public + user custom)
+curl 'http://127.0.0.1:51202/experts?user_id=xinyuan'
+
+# Create custom expert
+curl -X POST 'http://127.0.0.1:51202/experts/user' \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":"xinyuan","name":"Product Manager","tag":"pm","persona":"You are an experienced product manager skilled in requirements analysis and product planning","temperature":0.7}'
+
+# Update custom expert
+curl -X PUT 'http://127.0.0.1:51202/experts/user/pm' \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":"xinyuan","persona":"Updated expert description"}'
+
+# Delete custom expert
+curl -X DELETE 'http://127.0.0.1:51202/experts/user/pm?user_id=xinyuan'
+```
+
+#### 2. Session Management
+```bash
+# List OASIS-managed expert sessions (sessions containing #oasis#)
+curl 'http://127.0.0.1:51202/sessions/oasis?user_id=xinyuan'
+```
+
+#### 3. Workflow Management
+```bash
+# List user's saved workflows
+curl 'http://127.0.0.1:51202/workflows?user_id=xinyuan'
+
+# Save workflow (auto-generate layout)
+curl -X POST 'http://127.0.0.1:51202/workflows' \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":"xinyuan","name":"trio_discussion","schedule_yaml":"version:1\nplan:\n - expert: \"creative#temp#1\"","description":"Trio discussion","save_layout":true}'
+```
+
+#### 4. Layout Generation
+```bash
+# Generate layout from YAML
+curl -X POST 'http://127.0.0.1:51202/layouts/from-yaml' \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":"xinyuan","yaml_source":"version:1\nplan:\n - expert: \"creative#temp#1\"","layout_name":"trio_layout"}'
+```
+
+#### 5. Discussion/Execution
+```bash
+# Create discussion topic (synchronous, wait for conclusion)
+curl -X POST 'http://127.0.0.1:51202/topics' \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":"xinyuan","question":"Discussion topic","max_rounds":3,"schedule_yaml":"version:1\nplan:\n - expert: \"creative#temp#1\"","discussion":true}'
+
+# Create discussion topic (async, returns topic_id)
+curl -X POST 'http://127.0.0.1:51202/topics' \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":"xinyuan","question":"Discussion topic","max_rounds":3,"schedule_yaml":"version:1\nplan:\n - expert: \"creative#temp#1\"","discussion":true,"callback_url":"http://127.0.0.1:51200/system_trigger","callback_session_id":"my-session"}'
+
+# View discussion details
+curl 'http://127.0.0.1:51202/topics/{topic_id}?user_id=xinyuan'
+
+# Get discussion conclusion (blocking wait)
+curl 'http://127.0.0.1:51202/topics/{topic_id}/conclusion?user_id=xinyuan&timeout=300'
+
+# Cancel discussion
+curl -X DELETE 'http://127.0.0.1:51202/topics/{topic_id}?user_id=xinyuan'
+
+# List all discussion topics
+curl 'http://127.0.0.1:51202/topics?user_id=xinyuan'
+```
+
+#### 6. Real-time Stream
+```bash
+# SSE real-time update stream (discussion mode)
+curl 'http://127.0.0.1:51202/topics/{topic_id}/stream?user_id=xinyuan'
+```
+
+**Storage Locations:**
+- Workflows (YAML): `data/user_files/{user}/oasis/yaml/{file}.yaml` (canvas layouts are converted from YAML in real-time, no longer stored as separate layout JSON)
+- User custom experts: `data/oasis_user_experts/{user}.json`
+- Discussion records: `data/oasis_topics/{user}/{topic_id}.json`
+
+**Note:** These endpoints share the same backend implementation as MCP tools `list_oasis_experts`, `add_oasis_expert`, `update_oasis_expert`, `delete_oasis_expert`, `list_oasis_sessions`, `set_oasis_workflow`, `list_oasis_workflows`, `yaml_to_layout`, `post_to_oasis`, `check_oasis_discussion`, `cancel_oasis_discussion`, `list_oasis_topics`, ensuring consistent behavior.
+
+## Example Configuration Reference
+
+Below is an actual running configuration example (sensitive info redacted):
+
+```bash
+bash selfskill/scripts/run.sh configure --init
+bash selfskill/scripts/run.sh configure --batch \
+  LLM_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxx4c74 \
+  LLM_BASE_URL=https://deepseek.com \
+  LLM_MODEL=deepseek-chat \
+  LLM_VISION_SUPPORT=true \
+  TTS_MODEL=gemini-2.5-flash-preview-tts \
+  TTS_VOICE=charon \
+  PORT_AGENT=51200 \
+  PORT_SCHEDULER=51201 \
+  PORT_OASIS=51202 \
+  PORT_FRONTEND=51209 \
+  PORT_BARK=58010 \
+  OPENCLAW_API_URL=http://127.0.0.1:18789/v1/chat/completions \
+  OPENAI_STANDARD_MODE=false
+bash selfskill/scripts/run.sh add-user system <your-password>
+```
+
+Output after `configure --show`:
+
+```
+  PORT_SCHEDULER=51201
+  PORT_AGENT=51200
+  PORT_FRONTEND=51209
+  PORT_OASIS=51202
+  OASIS_BASE_URL=http://127.0.0.1:51202
+  PORT_BARK=58010
+  INTERNAL_TOKEN=f1aa****57e7          # Auto-generated, do not leak
+  LLM_API_KEY=sk-7****4c74
+  LLM_BASE_URL=https://deepseek.com
+  LLM_MODEL=deepseek-chat
+  LLM_VISION_SUPPORT=true
+  TTS_MODEL=gemini-2.5-flash-preview-tts
+  TTS_VOICE=charon
+  OPENAI_STANDARD_MODE=false
+```
+
+> Note: `INTERNAL_TOKEN` is auto-generated on first startup; `PUBLIC_DOMAIN` / `BARK_PUBLIC_URL` are auto-written by the tunnel; no manual configuration needed.
+
+## Typical Usage Flow
+
+```bash
+cd /home/avalon/TeamClaw
+
+# First-time configuration
+bash selfskill/scripts/run.sh setup
+bash selfskill/scripts/run.sh configure --init
+bash selfskill/scripts/run.sh configure --batch LLM_API_KEY=sk-xxx LLM_BASE_URL=https://api.deepseek.com LLM_MODEL=deepseek-chat
+bash selfskill/scripts/run.sh add-user system MyPass123
+
+# Start
+bash selfskill/scripts/run.sh start
+
+# Call API
+curl -X POST http://127.0.0.1:51200/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer system:MyPass123" \
+  -d '{"model":"mini-timebot","messages":[{"role":"user","content":"Hello"}],"stream":false,"session_id":"default"}'
+
+# Stop
+bash selfskill/scripts/run.sh stop
+```
+
+## Important Notes
+
+- All skill scripts are in `selfskill/scripts/`, not affecting original project functionality
+- Process management via PID files, `start` supports idempotent calls
+- Do not leak `INTERNAL_TOKEN`
+- Log path: `logs/launcher.log`
+
+- Be sure to tell users how to open the visual interface and how to log in to the account for discussions
+- The OpenClaw session file path can be inferred from the example path and current skill path. If you are an OpenClaw agent, be sure to complete the full OpenClaw-related configuration
+
+---
+---
+
+# TeamClaw — Agent 子系统 Skill（中文版）
+
+
 
 ## 简介
+
+TeamClaw 是一个类 OpenClaw 的多 Agent 子平台，拥有类似 OpenClaw 的内置轻量级 Agent，附带 computer use 功能以及社交软件（如 Telegram）集成。它可以在不阻塞主体 agent 的情况下独立运行，也可以由 OpenClaw agent 直接控制内置的 OASIS 协作平台进行多 Agent 编排。同时支持通过 Cloudflare 将前端暴露到公网，便于在手机页面等远程设备上展开可视化多 Agent 工作流编程。
 
 TeamClaw 是一个多功能 AI Agent 服务，提供：
 
@@ -152,15 +724,15 @@ POST /cancel
 
 ## OASIS 四种运行模式（默认：讨论模式）
 
-> 这里的“四个模式”是两组正交开关：
-> - **讨论 vs 执行**：决定专家输出是“论坛式讨论/投票”，还是“工作流式执行/交付物”。
+> 这里的"四个模式"是两组正交开关：
+> - **讨论 vs 执行**：决定专家输出是"论坛式讨论/投票"，还是"工作流式执行/交付物"。
 > - **同步 vs 脱离（detach）**：决定调用方是否阻塞等待结果。
 
 ### 1) 讨论模式 vs 执行模式
 
 **讨论模式（discussion=true，默认）**
 - 用途：多专家给出不同观点、利弊分析、争议点澄清，并可形成共识。
-- 适用：方案评审、技术路线选择、需要“为什么”的问题。
+- 适用：方案评审、技术路线选择、需要"为什么"的问题。
 
 **执行模式（discussion=false）**
 - 用途：把 OASIS 当作编排器按计划顺序/并行完成任务，强调直接产出（代码/脚本/清单/定稿方案）。
@@ -185,11 +757,11 @@ POST /cancel
    - `detach=false`
 
 2. 出现以下需求信号时，切换到 **执行模式**：
-   - “直接给最终版 / 可复制粘贴 / 可执行脚本 / 只要结论不要讨论”
-   - “按步骤生成 SOP / 清单 / 表格并定稿”
+   - "直接给最终版 / 可复制粘贴 / 可执行脚本 / 只要结论不要讨论"
+   - "按步骤生成 SOP / 清单 / 表格并定稿"
 
 3. 出现以下需求信号时，切换到 **脱离模式**：
-   - “后台跑 / 我一会儿再看 / 先给 topic_id”
+   - "后台跑 / 我一会儿再看 / 先给 topic_id"
    - 多专家并行、多轮（`max_rounds` 大）、或预计耗时长
 
 ### 4) 四种组合速查
