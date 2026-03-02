@@ -842,7 +842,7 @@ HTML_TEMPLATE = """
     <div id="app-splash">
         <img class="splash-icon" src="https://img.icons8.com/fluency/180/robot-2.png" alt="">
         <div class="splash-title">Teamclaw</div>
-        <div class="splash-sub">Xavier AI Agent</div>
+        <div class="splash-sub">TeamBot AI Agent</div>
     </div>
 
     <!-- Offline Banner -->
@@ -939,7 +939,7 @@ HTML_TEMPLATE = """
             <div id="chat-box" class="chat-container overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6 flex-grow bg-gray-50">
                 <div class="flex justify-start">
                     <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700" data-i18n="welcome_message">
-                        你好！我是 Xavier 智能助手。我已经准备好为你服务，请输入你的指令。
+                        你好！我是 TeamBot 智能助手。我已经准备好为你服务，请输入你的指令。
                     </div>
                 </div>
             </div>
@@ -1329,8 +1329,8 @@ HTML_TEMPLATE = """
                 menu_logout: '🚪 退出',
                 
                 // 聊天区域
-                welcome_message: '你好！我是 Xavier 智能助手。我已经准备好为你服务，请输入你的指令。',
-                new_session_message: '🆕 已开启新对话。我是 Xavier 智能助手，请输入你的指令。',
+                welcome_message: '你好！我是 TeamBot 智能助手。我已经准备好为你服务，请输入你的指令。',
+                new_session_message: '🆕 已开启新对话。我是 TeamBot 智能助手，请输入你的指令。',
                 input_placeholder: '输入指令...（可粘贴图片/上传文件/录音）',
                 send_btn: '发送',
                 cancel_btn: '终止',
@@ -1590,7 +1590,7 @@ orch_openclaw_sessions: '🦞 OpenClaw',
                 orch_ph_persona: '描述这位专家的角色、专长和行为风格...',
                 
                 // 其他
-                splash_subtitle: 'Xavier AI Agent',
+                splash_subtitle: 'TeamBot AI Agent',
                 secure_footer: 'Secured by Nginx Reverse Proxy & SSH Tunnel',
                 refresh: '刷新',
                 collapse: '收起',
@@ -1632,8 +1632,8 @@ orch_openclaw_sessions: '🦞 OpenClaw',
                 menu_logout: '🚪 Logout',
                 
                 // Chat area
-                welcome_message: 'Hello! I am Xavier AI Assistant. Ready to serve you. Please enter your instructions.',
-                new_session_message: '🆕 New conversation started. I am Xavier AI Assistant. Please enter your instructions.',
+                welcome_message: 'Hello! I am TeamBot AI Assistant. Ready to serve you. Please enter your instructions.',
+                new_session_message: '🆕 New conversation started. I am TeamBot AI Assistant. Please enter your instructions.',
                 input_placeholder: 'Enter command... (paste images/upload files/record audio)',
                 send_btn: 'Send',
                 cancel_btn: 'Stop',
@@ -1893,7 +1893,7 @@ orch_openclaw_sessions: '🦞 OpenClaw',
                 orch_ph_persona: 'Describe this expert\\'s role, expertise and behavior style...',
                 
                 // Others
-                splash_subtitle: 'Xavier AI Agent',
+                splash_subtitle: 'TeamBot AI Agent',
                 secure_footer: 'Secured by Nginx Reverse Proxy & SSH Tunnel',
                 refresh: 'Refresh',
                 collapse: 'Collapse',
@@ -5855,7 +5855,7 @@ def manifest():
     manifest_data = {
         "name": "Teamclaw",
         "short_name": "Teamclaw",
-        "description": "Xavier AI Agent - Intelligent Control Assistant",
+        "description": "TeamBot AI Agent - Intelligent Control Assistant",
         "start_url": "/",
         "scope": "/",
         "display": "standalone",

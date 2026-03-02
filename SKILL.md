@@ -1,16 +1,16 @@
 ---
-name: Teamclaw
+name: TeamClaw
 description:
   A high-performance Agent subsystem designed for complex multi-agent orchestration (OASIS),automated computer use tasks, and real-time visual monitoring via a dedicated Web UI.
 ---
 
-# Teamclaw — Agent 子系统 Skill
+# TeamClaw — Agent 子系统 Skill
 
 ** 如果你是openclaw agent，请将自己作为Teamclaw的外部agent**
 
 ## 简介
 
-Teamclaw 是一个多功能 AI Agent 服务，提供：
+TeamClaw 是一个多功能 AI Agent 服务，提供：
 
 - **对话 Agent**：基于 LangGraph 的多工具 AI 助手，支持流式/非流式对话
 - **OASIS 论坛**：多专家并行讨论/执行引擎，可编排多个 Agent 协作
@@ -158,7 +158,7 @@ OASIS 支持 **四种类型的智能体**，通过 `schedule_yaml` 中专家的 
 | 1 | **Direct LLM** | `tag#temp#N` | `ExpertAgent` | 无状态单次 LLM 调用。每轮读取所有帖子 → 一次 LLM 调用 → 发布 + 投票。无跨轮记忆。`tag` 映射到预设专家名/人设，`N` 是实例编号（同一专家可多副本）。 |
 | 2 | **Oasis Session** | `tag#oasis#id` | `SessionExpert` (oasis) | OASIS 管理的有状态 bot session。`tag` 映射到预设专家，首轮注入人设为 system prompt。Bot 跨轮保留对话记忆（增量上下文）。`id` 可为任意字符串，新 ID 首次使用时自动创建 session。 |
 | 3 | **Regular Agent** | `Title#session_id` | `SessionExpert` (regular) | 连接到已有的 agent session（如 `助手#default`、`Coder#my-project`）。不注入身份——session 自身的 system prompt 定义 agent。适合将个人 bot session 带入讨论。 |
-| 4 | **External API** | `tag#ext#id` | `ExternalExpert` | 直接调用任意 OpenAI 兼容外部 API（DeepSeek、GPT-4、Ollama、另一个 mini_timebot 实例等）。不经过本地 agent。外部服务假定有状态。支持通过 YAML `headers` 字段自定义请求头。 | 经典用途：和openclaw agent连接
+| 4 | **External API** | `tag#ext#id` | `ExternalExpert` | 直接调用任意 OpenAI 兼容外部 API（DeepSeek、GPT-4、Ollama、另一个 TeamClaw 实例等）。不经过本地 agent。外部服务假定有状态。支持通过 YAML `headers` 字段自定义请求头。 | 经典用途：和openclaw agent连接
 
 ### Session ID 格式
 
@@ -323,7 +323,7 @@ POST http://127.0.0.1:51202/topics
 {"question":"讨论主题","user_id":"system","max_rounds":3,"discussion":true,"schedule_file":"...","schedule_yaml":"...","callback_url":"http://127.0.0.1:51200/system_trigger","callback_session_id":"my-session"}
 ```
 
-注意优先使用schedule_yaml避免重复输入yaml，这是yaml工作流文件的绝对路径，一般在/XXXXX/Teamclaw/data/user_files/username下
+注意优先使用schedule_yaml避免重复输入yaml，这是yaml工作流文件的绝对路径，一般在/XXXXX/TeamClaw/data/user_files/username下
 
 ### 外部 curl 参与 OASIS 服务器（完整方法）
 
@@ -458,7 +458,7 @@ bash selfskill/scripts/run.sh add-user system <your-password>
 ## 典型使用流程
 
 ```bash
-cd /home/avalon/Teamclaw
+cd /home/avalon/TeamClaw
 
 # 首次配置
 bash selfskill/scripts/run.sh setup
