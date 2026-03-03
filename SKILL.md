@@ -204,6 +204,8 @@ POST /cancel
 
 ## OASIS Four Operating Modes (Default: Discussion Mode)
 
+> 📖 **Dedicated OASIS usage guide (especially for OpenClaw agent integration)**: [OASIS_GUIDE.md](./OASIS_GUIDE.md)
+
 > The "four modes" are two orthogonal switches:
 > - **Discussion vs Execution**: Determines whether expert output is "forum-style discussion/voting" or "workflow-style execution/deliverables".
 > - **Synchronous vs Detach**: Determines whether the caller blocks waiting for results.
@@ -770,9 +772,10 @@ POST /cancel
 
 ## OASIS 
 
+> 📖 **专注 OASIS 使用的独立指引文档（尤其是 OpenClaw agent 集成）**: [OASIS_GUIDE.md](./OASIS_GUIDE.md)
+
 > ""
-> - ** vs **"/""/"
-> - ** vs detach**
+> - ** vs **"/""/("> - ** vs detach**
 
 ### 1)  vs 
 
