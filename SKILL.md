@@ -1133,6 +1133,13 @@ Before starting TeamClaw for the first time, the following environment variables
 
 ### 1. LLM Configuration (Required)
 
+> ⚠️ **LLM API ≠ OpenClaw API — They are two completely separate sets of credentials!**
+>
+> - `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` → Your **LLM provider** (DeepSeek, OpenAI, Google, etc.). Used for the built-in Agent's conversations and OASIS experts.
+> - `OPENCLAW_API_URL` / `OPENCLAW_API_KEY` → Your **local OpenClaw service** endpoint. Used only for orchestrating OpenClaw agents on the visual Canvas.
+>
+> Do **NOT** mix them up. They point to different services, use different keys, and serve different purposes.
+
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `LLM_API_KEY` | Your LLM provider's API key. **This is mandatory.** | `sk-xxxxxxxxxxxxxxxx` |
@@ -1147,6 +1154,10 @@ bash selfskill/scripts/run.sh configure --batch \
 ```
 
 ### 2. OpenClaw Integration (Required for visual workflow orchestration)
+
+> ⚠️ **Reminder: OpenClaw API is NOT the same as LLM API above!**
+>
+> The `OPENCLAW_*` variables below point to your **locally running OpenClaw service**, not to an external LLM provider. They have completely different URLs, keys, and purposes.
 
 These variables are **required** if you intend to use the OASIS visual Canvas to orchestrate OpenClaw agents:
 
@@ -1186,6 +1197,13 @@ sleep 30  # Wait for tunnels to be established and PUBLIC_DOMAIN written to .env
 
 ### 1. LLM 配置（必填）
 
+> ⚠️ **LLM API ≠ OpenClaw API —— 这是两组完全不同的配置！**
+>
+> - `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` → 你的 **LLM 服务商**（DeepSeek、OpenAI、Google 等）。用于内置 Agent 对话和 OASIS 专家调用。
+> - `OPENCLAW_API_URL` / `OPENCLAW_API_KEY` → 你的 **本地 OpenClaw 服务** 端点。仅用于在可视化画布上编排 OpenClaw Agent。
+>
+> **切勿混淆！** 它们指向不同的服务，使用不同的密钥，用途完全不同。
+
 | 变量 | 说明 | 示例 |
 |------|------|------|
 | `LLM_API_KEY` | LLM 服务商的 API 密钥，**必填项**。 | `sk-xxxxxxxxxxxxxxxx` |
@@ -1200,6 +1218,10 @@ bash selfskill/scripts/run.sh configure --batch \
 ```
 
 ### 2. OpenClaw 集成配置（使用可视化编排时必填）
+
+> ⚠️ **再次提醒：OpenClaw API 和上面的 LLM API 不是同一个东西！**
+>
+> 下面的 `OPENCLAW_*` 变量指向你 **本地运行的 OpenClaw 服务**，而非外部 LLM 服务商。它们的 URL、密钥和用途完全不同。
 
 如果你需要使用 OASIS 可视化画布来编排 OpenClaw Agent，以下变量**必须配置**：
 
