@@ -82,9 +82,15 @@ bash selfskill/scripts/run.sh configure --batch \
   LLM_BASE_URL=https://api.deepseek.com \
   LLM_MODEL=deepseek-chat
 
-# Create user
+# ⚠️ Create user account (REQUIRED — without this you CANNOT log in to the Web UI or call API)
 bash selfskill/scripts/run.sh add-user system MySecurePass123
 ```
+
+> ⚠️ **You MUST create at least one user account before starting the service!**
+> - The Web UI login page requires username + password.
+> - All API calls require `Authorization: Bearer <user_id>:<password>` (or `INTERNAL_TOKEN:<user_id>`).
+> - If you skip this step, you will be locked out of the entire system.
+> - You can create multiple users. The first argument is the username, the second is the password.
 
 ### 2. Start / Stop / Status
 
@@ -94,7 +100,19 @@ bash selfskill/scripts/run.sh status    # Check status
 bash selfskill/scripts/run.sh stop      # Stop service
 ```
 
-### 3. Configuration Management
+### 3. Bark Push vs Chatbot (Telegram/QQ) — Startup Differences
+
+| Component | How it starts | Configuration needed | Notes |
+|-----------|--------------|---------------------|-------|
+| **Bark Push** (port 58010) | **Automatically** started by `launcher.py` | None — works out of the box | A standalone binary (`bin/bark-server`). Auto-downloaded on first `setup`. No env vars needed. |
+| **Telegram Bot** | **Requires manual setup** | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USERS` in `.env` | `launcher.py` calls `chatbot/setup.py` which has an **interactive menu** (`input()`). In headless/background mode this will **block**. To avoid blocking, configure the bot tokens in `.env` beforehand and start the bot separately: `nohup python chatbot/telegrambot.py > logs/telegrambot.log 2>&1 &` |
+| **QQ Bot** | **Requires manual setup** | `QQ_APP_ID`, `QQ_BOT_SECRET`, `QQ_BOT_USERNAME` in `.env` | Same as Telegram — interactive setup will block in headless mode. Start separately: `nohup python chatbot/QQbot.py > logs/qqbot.log 2>&1 &` |
+
+> ⚠️ **Important for Agent/headless usage**: The `chatbot/setup.py` script contains interactive `input()` prompts. When `launcher.py` runs in the background (via `run.sh start`), if `chatbot/setup.py` exists it will be called and **block indefinitely** waiting for user input. To prevent this:
+> 1. Either remove/rename `chatbot/setup.py` before starting, OR
+> 2. Pre-configure all bot tokens in `.env` and start bots independently (bypassing `setup.py`).
+
+### 4. Configuration Management
 
 ```bash
 # View current configuration (sensitive values masked)
