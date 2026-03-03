@@ -651,7 +651,7 @@ async def delete_user_expert_route(tag: str, user_id: str = Query(...)):
 
 _OPENCLAW_SESSIONS_FILE = os.getenv(
     "OPENCLAW_SESSIONS_FILE",
-    "",
+    None,
 )
 
 
