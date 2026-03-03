@@ -2,7 +2,7 @@
 # Mini TimeBot 一键运行（环境配置 + API Key + 注册用户 + 启动服务）
 
 # 锁定绝对路径：确保无论在哪启动，都能找到项目根目录
-export PROJECT_ROOT="$(cd "$(dirname "$(readlink -f "$0")")") && pwd)"
+export PROJECT_ROOT="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 export MINI_TIMEBOT_HEADLESS=0
 cd "$PROJECT_ROOT"
 echo "========== 1/4 环境检查与配置 =========="
