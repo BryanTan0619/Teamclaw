@@ -821,6 +821,13 @@ HTML_TEMPLATE = """
         .file-preview-item .remove-btn { width: 16px; height: 16px; background: #ef4444; color: white; border: none; border-radius: 50%; font-size: 9px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; flex-shrink: 0; }
         .chat-file-tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; background: rgba(255,255,255,0.15); font-size: 12px; margin-bottom: 4px; }
         /* Audio recording button */
+        .workflow-add-btn { cursor: pointer; color: #6b7280; transition: all 0.2s; flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 42px; height: 42px; border-radius: 10px; border: 1px solid #e5e7eb; background: #f9fafb; font-size: 18px; }
+        .workflow-add-btn:hover { color: #7c3aed; border-color: #c4b5fd; background: #f5f3ff; }
+        @media (max-width: 768px) { .workflow-add-btn { width: 36px; height: 36px; font-size: 16px; } }
+        .workflow-tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: 8px; background: #f5f3ff; border: 1px solid #c4b5fd; font-size: 12px; color: #7c3aed; margin-right: 4px; margin-bottom: 4px; }
+        .workflow-tag .wf-remove { cursor: pointer; margin-left: 2px; font-size: 10px; color: #a78bfa; }
+        .workflow-tag .wf-remove:hover { color: #dc2626; }
+        #workflow-preview-area { display: none; flex-wrap: wrap; gap: 4px; padding: 4px 0; }
         .audio-record-btn { cursor: pointer; color: #6b7280; transition: all 0.2s; flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 42px; height: 42px; border-radius: 10px; border: 1px solid #e5e7eb; background: #f9fafb; font-size: 18px; }
         .audio-record-btn:hover { color: #dc2626; border-color: #fecaca; background: #fef2f2; }
         .audio-record-btn.recording { color: #fff; background: #dc2626; border-color: #dc2626; animation: pulse-red 1.2s infinite; }
@@ -971,12 +978,14 @@ HTML_TEMPLATE = """
                 <div id="image-preview-area" class="image-preview-area" style="display:none;"></div>
                 <div id="file-preview-area" class="image-preview-area" style="display:none;"></div>
                 <div id="audio-preview-area" class="image-preview-area" style="display:none;"></div>
+                <div id="workflow-preview-area"></div>
                 <div class="flex items-end space-x-2 sm:space-x-3">
                     <label class="image-upload-btn" title="上传图片/文件/音频">
                         📎
                         <input type="file" id="image-input" accept="image/*,.pdf,.txt,.md,.csv,.json,.xml,.yaml,.yml,.log,.py,.js,.ts,.html,.css,.java,.c,.cpp,.h,.go,.rs,.sh,.bat,.ini,.toml,.cfg,.conf,.sql,.r,.rb,.mp3,.wav,.ogg,.m4a,.webm,.flac,.aac,.avi,.mp4,.mkv,.mov" multiple style="display:none;" onchange="handleFileSelect(event)">
                     </label>
                     <button id="record-btn" class="audio-record-btn" data-i18n-title="recording_title" title="录音" onclick="toggleRecording()">🎤</button>
+                    <button id="workflow-add-btn" class="workflow-add-btn" data-i18n-title="wf_btn_title" title="添加工作流" onclick="showWorkflowPopup()">📋</button>
                     <div class="flex-grow">
                         <textarea id="user-input" rows="1" 
                             class="w-full p-2 sm:p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none transition-all text-sm sm:text-base"
@@ -1590,6 +1599,14 @@ orch_openclaw_sessions: '🦞 OpenClaw',
                 orch_ph_tag: '如：finance',
                 orch_ph_persona: '描述这位专家的角色、专长和行为风格...',
                 
+                // Add Workflow
+                wf_btn_title: '添加工作流',
+                wf_popup_title: '📋 选择工作流',
+                wf_no_workflows: '暂无已保存的工作流',
+                wf_cancel: '取消',
+                wf_confirm: '添加',
+                wf_context_prefix: '[工作流: {name}] ',
+                
                 // 其他
                 splash_subtitle: 'TeamBot AI Agent',
                 secure_footer: 'Secured by Nginx Reverse Proxy & SSH Tunnel',
@@ -1892,6 +1909,14 @@ orch_openclaw_sessions: '🦞 OpenClaw',
                 orch_ph_name: 'e.g. Financial Analyst',
                 orch_ph_tag: 'e.g. finance',
                 orch_ph_persona: 'Describe this expert\\'s role, expertise and behavior style...',
+                
+                // Add Workflow
+                wf_btn_title: 'Add Workflow',
+                wf_popup_title: '📋 Select Workflow',
+                wf_no_workflows: 'No saved workflows',
+                wf_cancel: 'Cancel',
+                wf_confirm: 'Add',
+                wf_context_prefix: '[Workflow: {name}] ',
                 
                 // Others
                 splash_subtitle: 'TeamBot AI Agent',
@@ -3135,9 +3160,11 @@ orch_openclaw_sessions: '🦞 OpenClaw',
             pendingImages = [];
             pendingFiles = [];
             pendingAudios = [];
+            pendingWorkflows = [];
             renderImagePreviews();
             renderFilePreviews();
             renderAudioPreviews();
+            renderWorkflowPreviews();
             sendBtn.disabled = true;
             showTyping();
 
@@ -3360,6 +3387,100 @@ orch_openclaw_sessions: '🦞 OpenClaw',
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
         });
         inputField.addEventListener('paste', handlePasteImage);
+
+        // ================================================================
+        // ===== Add Workflow 功能 =====
+        // ================================================================
+        let pendingWorkflows = [];  // [{name: 'xxx'}, ...]
+
+        function renderWorkflowPreviews() {
+            const area = document.getElementById('workflow-preview-area');
+            if (!pendingWorkflows.length) { area.style.display = 'none'; return; }
+            area.style.display = 'flex';
+            area.innerHTML = pendingWorkflows.map((wf, i) =>
+                `<span class="workflow-tag">📋 ${escapeHtml(wf.name)}<span class="wf-remove" onclick="removeWorkflow(${i})">&times;</span></span>`
+            ).join('');
+        }
+
+        function removeWorkflow(idx) {
+            pendingWorkflows.splice(idx, 1);
+            renderWorkflowPreviews();
+        }
+
+        async function showWorkflowPopup() {
+            try {
+                const r = await fetch('/proxy_visual/load-layouts', {
+                    headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+                });
+                const layouts = await r.json();
+                if (!layouts.length) { alert(t('wf_no_workflows')); return; }
+
+                const overlay = document.createElement('div');
+                overlay.className = 'orch-modal-overlay';
+                overlay.id = 'wf-popup-overlay';
+                overlay.innerHTML = `
+                    <div class="orch-modal" style="min-width:320px;max-width:420px;">
+                        <h3>${t('wf_popup_title')}</h3>
+                        <div id="wf-select-list" style="max-height:300px;overflow-y:auto;"></div>
+                        <div class="orch-modal-btns">
+                            <button id="wf-cancel-btn" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;font-size:12px;">${t('wf_cancel')}</button>
+                            <button id="wf-confirm-btn" disabled style="padding:6px 14px;border-radius:6px;border:none;background:#7c3aed;color:white;cursor:pointer;font-size:12px;opacity:0.5;">${t('wf_confirm')}</button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(overlay);
+
+                let selectedName = null;
+                overlay.querySelector('#wf-cancel-btn').addEventListener('click', () => overlay.remove());
+                overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+                const listEl = overlay.querySelector('#wf-select-list');
+                for (const name of layouts) {
+                    const item = document.createElement('div');
+                    item.className = 'orch-session-item';
+                    item.style.cssText = 'padding:10px 12px;border-radius:8px;cursor:pointer;border:1px solid transparent;margin-bottom:4px;display:flex;align-items:center;gap:8px;transition:all 0.15s;';
+                    item.innerHTML = `<span style="font-size:16px;">📋</span><span style="flex:1;font-size:13px;color:#374151;">${escapeHtml(name)}</span>`;
+                    item.addEventListener('click', () => {
+                        listEl.querySelectorAll('.orch-session-item').forEach(el => {
+                            el.style.background = '';
+                            el.style.borderColor = 'transparent';
+                        });
+                        item.style.background = '#f5f3ff';
+                        item.style.borderColor = '#c4b5fd';
+                        selectedName = name;
+                        const btn = overlay.querySelector('#wf-confirm-btn');
+                        btn.disabled = false;
+                        btn.style.opacity = '1';
+                    });
+                    item.addEventListener('dblclick', () => {
+                        selectedName = name;
+                        addWorkflowToContext(selectedName);
+                        overlay.remove();
+                    });
+                    listEl.appendChild(item);
+                }
+
+                overlay.querySelector('#wf-confirm-btn').addEventListener('click', () => {
+                    if (selectedName) {
+                        addWorkflowToContext(selectedName);
+                        overlay.remove();
+                    }
+                });
+            } catch(e) {
+                console.error('Failed to load workflows:', e);
+            }
+        }
+
+        function addWorkflowToContext(name) {
+            // Avoid duplicate
+            if (pendingWorkflows.some(w => w.name === name)) return;
+            pendingWorkflows.push({ name });
+            renderWorkflowPreviews();
+            // Also prepend workflow context to input
+            const prefix = t('wf_context_prefix', { name });
+            inputField.value = prefix + inputField.value;
+            inputField.focus();
+        }
 
         // ================================================================
         // ===== OASIS 讨论面板逻辑 =====
