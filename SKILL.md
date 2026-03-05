@@ -222,38 +222,38 @@ POST /cancel
 
 ### 2) Synchronous Mode vs Detach Mode
 
-**Synchronous (detach=false, default)**
+**Detach (detach=true, default)**
+- Behavior: Returns `topic_id` immediately, continues running/discussing in the background; later use `check_oasis_discussion(topic_id)` to track progress and results.
+- Use case: Most tasks, especially multi-round/multi-expert/long-running/tool-calling tasks.
+
+**Synchronous (detach=false)**
 - Behavior: After calling `post_to_oasis`, waits for completion and returns the final result directly.
 - Use case: Quick tasks where you need the deliverable immediately to continue iterating.
-
-**Detach (detach=true)**
-- Behavior: Returns `topic_id` immediately, continues running/discussing in the background; later use `check_oasis_discussion(topic_id)` to track progress and results.
-- Use case: Multi-round/multi-expert/long-running/tool-calling tasks where you don't want to block the current session.
 
 ### 3) Auto-selection Rules (Recommended Default Strategy)
 
 When not explicitly specified, the following default strategy is recommended:
 
-1. **Default = Discussion + Synchronous**
+1. **Default = Discussion + Detach**
    - `discussion=true`
-   - `detach=false`
+   - `detach=true`
 
 2. Switch to **Execution Mode** when these signals appear:
    - "Give me the final version / copy-pasteable / executable script / just conclusions no discussion"
    - "Generate SOP / checklist / table step by step and finalize"
 
-3. Switch to **Detach Mode** when these signals appear:
-   - "Run in background / I'll check later / just give me the topic_id"
-   - Multi-expert parallel, multi-round (large `max_rounds`), or expected long duration
+3. Switch to **Synchronous Mode** when these signals appear:
+   - "Wait for the result / I need it now / give me the answer directly"
+   - Quick single-round tasks where the deliverable is needed immediately
 
 ### 4) Four Combinations Quick Reference
 
 | Combination | Parameters | Returns | Use Case |
 |---|---|---|---|
-| Discussion + Sync (default) | discussion=true, detach=false | See discussion & conclusion on the spot | Decision/review/collect opinions |
-| Discussion + Detach | discussion=true, detach=true | topic_id, check later | Long discussion/multi-round |
-| Execution + Sync | discussion=false, detach=false | Direct deliverables | Generate code/plans/checklists |
+| Discussion + Detach **(default)** | discussion=true, detach=true | topic_id, check later | Decision/review/collect opinions |
+| Discussion + Sync | discussion=true, detach=false | See discussion & conclusion on the spot | Quick discussion needing immediate result |
 | Execution + Detach | discussion=false, detach=true | topic_id, check later | Long execution/complex pipelines |
+| Execution + Sync | discussion=false, detach=false | Direct deliverables | Generate code/plans/checklists |
 
 
 ## OASIS Four Agent Types
@@ -789,13 +789,13 @@ POST /cancel
 
 ### 2)  vs detach
 
-**detach=false**
--  `post_to_oasis` 
-- 
-
 **detach=true**
 -  `topic_id`/ `check_oasis_discussion(topic_id)` 
-- ///
+- 
+
+**detach=false**
+-  `post_to_oasis` 
+- /
 
 ### 3) 
 
@@ -803,24 +803,24 @@ POST /cancel
 
 1. ** =  + **
    - `discussion=true`
-   - `detach=false`
+   - `detach=true`
 
 2.  ****
    - " /  /  / "
    - " SOP /  / "
 
 3.  ****
-   - " /  /  topic_id"
-   - `max_rounds` 
+   - " /  /  / "
+   - /
 
 ### 4) 
 
 |  |  |  |  |
 |---|---|---|---|
-|  +  | discussion=true, detach=false |  | // |
-|  +  | discussion=true, detach=true | topic_id | / |
-|  +  | discussion=false, detach=false |  | // |
+|  +  **()** | discussion=true, detach=true | topic_id | // |
+|  +  | discussion=true, detach=false |  | / |
 |  +  | discussion=false, detach=true | topic_id | / |
+|  +  | discussion=false, detach=false |  | // |
 
 
 ## OASIS 

@@ -24,7 +24,8 @@
          - all_experts: true
    - Oasis session 无需预创建，首次使用时自动创建。
    - 可混合使用多种专家类型。使用 check_oasis_discussion 可查看讨论/任务进展，list_oasis_topics 可查看历史讨论。
-   - 脱离运行（detach=True）：提交后立即返回 topic_id，不等待完成。适合耗时较长的任务，稍后用 check_oasis_discussion 查看结果。
+   - 脱离运行（detach=True，默认）：提交后立即返回 topic_id，不等待完成。稍后用 check_oasis_discussion 查看结果。
+   - 同步运行（detach=False）：提交后阻塞等待讨论/执行完成，直接返回最终结果。适合快速任务需要立即获取结果的场景。
    - ⚠️ schedule_file 优先规则：
      * 如果用户已有保存的 YAML 工作流文件（oasis/yaml/ 目录下），直接用 schedule_file="文件名.yaml" 引用即可，**不需要再写 schedule_yaml**。
      * 如果同时提供了 schedule_file 和 schedule_yaml，**文件优先**，schedule_yaml 会被忽略。

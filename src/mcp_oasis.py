@@ -308,7 +308,7 @@ async def post_to_oasis(
     username: str = "",
     max_rounds: int = 5,
     schedule_file: str = "",
-    detach: bool = False,
+    detach: bool = True,
     notify_session: str = "",
     discussion: bool = False,
 ) -> str:
@@ -397,7 +397,8 @@ async def post_to_oasis(
         max_rounds: Maximum number of discussion rounds (1-20, default 5)
         schedule_file: Filename or path to a saved YAML workflow file. Short names (e.g. "review.yaml")
             are resolved under data/user_files/{user}/oasis/yaml/. Takes priority over schedule_yaml.
-        detach: If True, return immediately with topic_id. Use check_oasis_discussion later.
+        detach: If True (default), return immediately with topic_id. Use check_oasis_discussion later.
+            If False, block and wait for the final conclusion.
         notify_session: (auto-injected) Session ID for completion notification.
         discussion: If False (default), execute mode — agents just run tasks without discussion format.
             If True, forum discussion mode with JSON reply/vote.
