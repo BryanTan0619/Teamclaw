@@ -581,10 +581,10 @@ Based on the above canvas arrangement, generate an OASIS YAML schedule that:
 4. Uses `repeat: {str(settings.get('repeat', True)).lower()}`
 5. Optimizes the collaboration pattern for the given experts
 
-After generating the YAML, you MUST also save it as a workflow using the `set_oasis_workflow` tool with a descriptive name,
-so that the workflow is immediately ready to use from the OASIS panel. Both generating and saving are required.
+You MUST also call the `set_oasis_workflow` tool to save the generated YAML as a named workflow,
+so that the workflow is immediately ready to use from the OASIS panel.
 
-Output ONLY the YAML schedule, no explanations."""
+Output the YAML schedule in your response, and call the save tool. Both are required."""
 
     return prompt
 
@@ -633,13 +633,12 @@ def agent_generate_yaml():
                     "role": "system",
                     "content": (
                         "You are a YAML schedule generator for the OASIS expert orchestration engine. "
-                        "Your task has TWO parts: (1) Generate valid OASIS YAML, and (2) Save it as a workflow so it's ready to use.\n\n"
-                        "STEP 1 — Generate YAML: Output valid YAML starting with 'version: 1' and containing a 'plan:' section. "
-                        "No markdown fences, no explanations, no commentary — just the raw YAML.\n\n"
-                        "STEP 2 — Save Workflow: After generating the YAML, you MUST call the `set_oasis_workflow` MCP tool to save it as a named workflow. "
+                        "You have TWO tasks to complete:\n\n"
+                        "1. Generate a valid OASIS YAML schedule (starting with 'version: 1' and containing a 'plan:' section).\n"
+                        "2. Call the `set_oasis_workflow` MCP tool to save it as a named workflow so it is immediately ready to use.\n\n"
+                        "You may output the YAML in your response AND call the tool — both are required. "
                         "Use a descriptive workflow name based on the task/experts involved (e.g. 'code_review_pipeline', 'brainstorm_trio'). "
-                        "This ensures the workflow is immediately available for use on the OASIS canvas without manual saving.\n\n"
-                        "Both steps are mandatory. Do NOT skip the save step."
+                        "No markdown fences around the YAML. Both steps are mandatory."
                     ),
                 },
                 {
