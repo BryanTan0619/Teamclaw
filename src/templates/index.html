@@ -73,6 +73,7 @@
             <div class="p-3 border-b bg-gray-50 flex justify-between items-center flex-shrink-0">
                 <span class="text-sm font-bold text-gray-700" data-i18n="history_title">🤖 Agents</span>
                 <div class="flex items-center gap-2">
+                    <button id="toggle-oasis-sessions-btn" onclick="toggleOasisSessionsVisible()" class="text-[10px] text-gray-400 hover:text-blue-600 px-1.5 py-0.5 rounded border border-gray-200 transition-colors" title="切换 OASIS/普通会话">🏛️ OASIS</button>
                     <button onclick="deleteAllSessions()" class="text-xs text-red-400 hover:text-red-600" data-i18n="delete_all">🗑️ 清空全部</button>
                     <button onclick="closeSessionSidebar()" class="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
                 </div>
@@ -320,7 +321,6 @@
 
                 <!-- Center: Canvas -->
                 <div class="orch-canvas-wrapper">
-                    <button class="orch-sidebar-toggle" id="orch-sidebar-toggle" onclick="toggleOrchSidebar()" title="Toggle Expert Pool">◀</button>
                     <!-- Toolbar -->
                     <div class="orch-toolbar">
                         <button onclick="orchAutoArrange()" class="orch-btn" data-i18n-title="orch_tip_arrange" title="自动排列"><span data-i18n="orch_btn_arrange">🔄 排列</span></button>

@@ -152,9 +152,9 @@ class DiscussionEngine:
                       f"Use 'tag#temp#N' or 'tag#oasis#id' or 'name#ext#id' or 'title#session_id'.")
                 continue
 
-            # Handle #new suffix: strip it and generate a random session part
+            # Handle #new suffix: strip only "new", keep the '#' separator
             force_new = full_name.endswith("#new")
-            working_name = full_name[:-4] if force_new else full_name  # strip "#new"
+            working_name = full_name[:-3] if force_new else full_name  # strip "new" only
 
             first, sid = working_name.split("#", 1)
             expert: ExpertAgent | SessionExpert | ExternalExpert

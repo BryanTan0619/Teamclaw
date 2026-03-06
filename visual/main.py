@@ -701,10 +701,11 @@ Based on the above canvas arrangement, generate an OASIS YAML schedule that:
 5. Uses `repeat: {str(settings.get('repeat', True)).lower()}`
 6. Maximizes parallelism — nodes with no dependency relationship should be able to run concurrently
 
-You MUST also call the `set_oasis_workflow` tool to save the generated YAML as a named workflow,
-so that the workflow is immediately ready to use from the OASIS panel.
+You MUST follow this exact order:
+1. FIRST, call the `set_oasis_workflow` tool to save the generated YAML as a named workflow (so the workflow is immediately ready to use from the OASIS panel).
+2. THEN, output the complete YAML schedule in your response text.
 
-Output the YAML schedule in your response, and call the save tool. Both are required."""
+Both steps are mandatory and the order matters — save first, then output."""
 
     return prompt
 
@@ -753,14 +754,13 @@ def agent_generate_yaml():
                     "role": "system",
                     "content": (
                         "You are a YAML schedule generator for the OASIS expert orchestration engine. "
-                        "You have TWO tasks to complete:\n\n"
-                        "1. Generate a valid OASIS YAML schedule (starting with 'version: 1' and containing a 'plan:' section). "
+                        "You have TWO tasks to complete IN ORDER:\n\n"
+                        "1. FIRST: Call the `set_oasis_workflow` MCP tool to save the generated YAML as a named workflow "
+                        "(use a descriptive name based on the task/experts, e.g. 'code_review_pipeline', 'brainstorm_trio').\n"
+                        "2. THEN: Output the complete YAML schedule in your response text.\n\n"
                         "The schedule supports two modes: LINEAR (simple sequential steps) and DAG (steps with `id` and `depends_on` "
                         "fields for parallel execution with dependency tracking). Use DAG mode when the workflow has fan-in or fan-out.\n"
-                        "2. Call the `set_oasis_workflow` MCP tool to save it as a named workflow so it is immediately ready to use.\n\n"
-                        "You may output the YAML in your response AND call the tool — both are required. "
-                        "Use a descriptive workflow name based on the task/experts involved (e.g. 'code_review_pipeline', 'brainstorm_trio'). "
-                        "No markdown fences around the YAML. Both steps are mandatory."
+                        "No markdown fences around the YAML. Both steps are mandatory and the order matters — save first, then output."
                     ),
                 },
                 {

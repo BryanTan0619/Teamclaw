@@ -1088,6 +1088,30 @@ function closeSessionSidebar() {
     sessionSidebarOpen = false;
 }
 
+// Session filter mode: 'oasis' = only show oasis sessions, 'other' = only show non-oasis sessions
+let sessionFilterMode = 'oasis';
+
+function isOasisSession(sessionId) {
+    return sessionId && sessionId.includes('#oasis#');
+}
+
+function shouldShowSession(sessionId) {
+    const isOasis = isOasisSession(sessionId);
+    return sessionFilterMode === 'oasis' ? isOasis : !isOasis;
+}
+
+function toggleOasisSessionsVisible() {
+    sessionFilterMode = sessionFilterMode === 'oasis' ? 'other' : 'oasis';
+    const btn = document.getElementById('toggle-oasis-sessions-btn');
+    if (btn) {
+        btn.textContent = sessionFilterMode === 'oasis' ? '🏛️ OASIS' : '💬 会话';
+    }
+    // Apply filter to all session items
+    document.querySelectorAll('.session-item[data-session-id]').forEach(el => {
+        el.style.display = shouldShowSession(el.dataset.sessionId) ? '' : 'none';
+    });
+}
+
 async function loadSessionList() {
     const listEl = document.getElementById('session-list');
     if (!listEl.querySelector('.session-item')) {
@@ -1113,6 +1137,9 @@ async function loadSessionList() {
                 <button class="session-delete" onclick="event.stopPropagation(); deleteSession('${s.session_id}')">${t('delete_session')}</button>
             `;
             div.onclick = () => switchToSession(s.session_id);
+            if (!shouldShowSession(s.session_id)) {
+                div.style.display = 'none';
+            }
             listEl.appendChild(div);
         }
         refreshSessionStatus();
@@ -1179,6 +1206,8 @@ async function refreshHistoryList() {
                 }
                 // active 状态
                 div.classList.toggle('active', s.session_id === currentSessionId);
+                // session 可见性
+                div.style.display = shouldShowSession(s.session_id) ? '' : 'none';
             } else {
                 // 新增的 session
                 div = document.createElement('div');
@@ -1190,6 +1219,9 @@ async function refreshHistoryList() {
                     <button class="session-delete" onclick="event.stopPropagation(); deleteSession('${s.session_id}')">${t('delete_session')}</button>
                 `;
                 div.onclick = () => switchToSession(s.session_id);
+                if (!shouldShowSession(s.session_id)) {
+                    div.style.display = 'none';
+                }
                 if (prevEl && prevEl.nextSibling) {
                     listEl.insertBefore(div, prevEl.nextSibling);
                 } else if (!prevEl) {
@@ -1288,15 +1320,31 @@ async function deleteSession(sessionId) {
 }
 
 async function deleteAllSessions() {
-    if (!confirm(t('delete_all_confirm'))) return;
+    // Collect visible session ids based on current filter mode
+    const visibleIds = [];
+    document.querySelectorAll('.session-item[data-session-id]').forEach(el => {
+        if (el.style.display !== 'none') {
+            visibleIds.push(el.dataset.sessionId);
+        }
+    });
+    if (visibleIds.length === 0) return;
+    const modeLabel = sessionFilterMode === 'oasis' ? 'OASIS' : '普通';
+    if (!confirm(`确认删除当前显示的 ${visibleIds.length} 个${modeLabel}会话？`)) return;
     try {
-        const resp = await fetch('/proxy_delete_session', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ session_id: '' })
-        });
-        const data = await resp.json();
-        if (resp.ok && data.status === 'success') {
+        let failCount = 0;
+        await Promise.all(visibleIds.map(async sid => {
+            try {
+                const resp = await fetch('/proxy_delete_session', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ session_id: sid })
+                });
+                const data = await resp.json();
+                if (!resp.ok || data.status !== 'success') failCount++;
+            } catch { failCount++; }
+        }));
+        // If current session was among deleted, reset it
+        if (visibleIds.includes(currentSessionId)) {
             currentSessionId = generateSessionId();
             sessionStorage.setItem('sessionId', currentSessionId);
             updateSessionDisplay();
@@ -1306,10 +1354,9 @@ async function deleteAllSessions() {
                         ${t('new_session_message')}
                     </div>
                 </div>`;
-            await loadSessionList();
-        } else {
-            alert(t('delete_fail') + ': ' + (data.detail || data.error || ''));
         }
+        await loadSessionList();
+        if (failCount > 0) alert(`${failCount} 个会话删除失败`);
     } catch (e) {
         alert(t('delete_fail') + ': ' + e.message);
     }
@@ -2417,7 +2464,7 @@ function renderTopicDetail(detail) {
     // Show/hide conclusion
     const conclusionArea = document.getElementById('oasis-conclusion-area');
     if (detail.conclusion && detail.status === 'concluded') {
-        document.getElementById('oasis-conclusion-text').textContent = detail.conclusion;
+        document.getElementById('oasis-conclusion-text').innerHTML = marked.parse(detail.conclusion || '');
         conclusionArea.style.display = 'block';
         // Reset to expanded state
         const textEl = document.getElementById('oasis-conclusion-text');
@@ -2510,7 +2557,7 @@ function renderPosts(posts, timeline, isDiscussion) {
                                 <span>#${p.id}</span>
                             </div>
                         </div>
-                        <p class="text-xs text-gray-600 mt-1 leading-relaxed">${escapeHtml(p.content)}</p>
+                        <div class="text-xs text-gray-600 mt-1 leading-relaxed markdown-body">${marked.parse(p.content || '')}</div>
                         <div class="flex items-center space-x-3 mt-2">
                             <div class="flex items-center space-x-1">
                                 <span class="text-[10px]">👍 ${p.upvotes}</span>
@@ -2529,6 +2576,11 @@ function renderPosts(posts, timeline, isDiscussion) {
 
     // Auto-scroll to bottom
     box.scrollTop = box.scrollHeight;
+
+    // Highlight code blocks in rendered markdown
+    box.querySelectorAll('pre code').forEach(el => {
+        try { hljs.highlightElement(el); } catch(e) {}
+    });
 }
 
 function startDetailPolling(topicId) {
