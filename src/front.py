@@ -1098,6 +1098,45 @@ def proxy_visual_delete_layout(name):
     return jsonify({"error": "Not found"}), 404
 
 
+@app.route("/proxy_visual/upload-yaml", methods=["POST"])
+def proxy_visual_upload_yaml():
+    """Upload a YAML file: save it and convert to layout data for canvas import."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "Not logged in"}), 401
+    data = request.get_json()
+    if not data or not data.get("content"):
+        return jsonify({"error": "No content"}), 400
+
+    filename = data.get("filename", "upload.yaml")
+    content = data["content"]
+
+    # Validate YAML syntax
+    try:
+        _yaml.safe_load(content)
+    except Exception as e:
+        return jsonify({"error": f"Invalid YAML: {e}"}), 400
+
+    # Save the file
+    safe = "".join(c for c in os.path.splitext(filename)[0] if c.isalnum() or c in "-_ ").strip() or "upload"
+    yaml_dir = os.path.join(root_dir, "data", "user_files", user_id, "oasis", "yaml")
+    os.makedirs(yaml_dir, exist_ok=True)
+    fpath = os.path.join(yaml_dir, f"{safe}.yaml")
+    with open(fpath, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    # Convert to layout data if converter available
+    layout = None
+    if _vis_yaml_to_layout:
+        try:
+            layout = _vis_yaml_to_layout(content)
+            layout["name"] = safe
+        except Exception:
+            layout = None
+
+    return jsonify({"saved": True, "name": safe, "layout": layout})
+
+
 @app.route("/proxy_visual/sessions-status", methods=["GET"])
 def proxy_visual_sessions_status():
     """Return all sessions with their running status for the canvas display."""

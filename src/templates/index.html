@@ -327,6 +327,9 @@
                         <button onclick="orchLoadLayout()" class="orch-btn" data-i18n-title="orch_tip_load" title="加载布局"><span data-i18n="orch_btn_load">📂 加载</span></button>
                         <button onclick="orchGenerateAgentYaml()" class="orch-btn orch-btn-primary" data-i18n-title="orch_tip_ai" title="AI 生成 YAML"><span data-i18n="orch_btn_ai">🤖 AI编排</span></button>
                         <button onclick="orchExportYaml()" class="orch-btn orch-btn-primary" data-i18n-title="orch_tip_export" title="复制 YAML"><span data-i18n="orch_btn_export">📋 导出</span></button>
+                        <button onclick="orchDownloadYaml()" class="orch-btn" data-i18n-title="orch_tip_download" title="下载 YAML 文件"><span data-i18n="orch_btn_download">⬇️ 下载</span></button>
+                        <button onclick="orchUploadYamlClick()" class="orch-btn" data-i18n-title="orch_tip_upload" title="上传 YAML 文件"><span data-i18n="orch_btn_upload">⬆️ 上传</span></button>
+                        <input type="file" id="orch-yaml-upload-input" accept=".yaml,.yml" style="display:none;" onchange="orchHandleYamlUpload(event)">
                         <button onclick="orchRefreshSessions()" class="orch-btn" data-i18n-title="orch_tip_status" title="刷新 session 状态"><span data-i18n="orch_btn_status">🔄 状态</span></button>
                         <button onclick="orchClearCanvas()" class="orch-btn orch-btn-danger" data-i18n-title="orch_tip_clear" title="清空画布"><span data-i18n="orch_btn_clear">🗑️ 清空</span></button>
                     </div>

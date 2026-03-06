@@ -51,6 +51,7 @@ function orchInit() {
     orchLoadOpenClawSessions();
     orchSetupCanvas();
     orchSetupSettings();
+    orchSetupFileDrop();
     // Bind manual injection card events (dragstart + dblclick)
     const mc = document.getElementById('orch-manual-card');
     if (mc) {
@@ -1119,6 +1120,142 @@ function orchExportYaml() {
         const ta = document.createElement('textarea'); ta.value = yaml; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); orchToast(t('orch_toast_yaml_copied'));
     });
 }
+
+// ── Download YAML as file ──
+function orchDownloadYaml() {
+    const yaml = document.getElementById('orch-yaml-content').textContent;
+    if (!yaml || yaml.startsWith(t('orch_rule_yaml_hint').substring(0,2))) { orchToast(t('orch_toast_gen_yaml')); return; }
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const fname = `oasis_${ts}.yaml`;
+    const blob = new Blob([yaml], { type: 'application/x-yaml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fname; a.style.display = 'none';
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
+    orchToast(t('orch_toast_yaml_downloaded'));
+}
+
+// ── Upload YAML (button click) ──
+function orchUploadYamlClick() {
+    document.getElementById('orch-yaml-upload-input').click();
+}
+
+function orchHandleYamlUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    event.target.value = ''; // reset so re-selecting same file works
+    orchImportYamlFile(file);
+}
+
+// ── Import a YAML file → upload to server → load as layout ──
+async function orchImportYamlFile(file) {
+    const fname = file.name || 'upload.yaml';
+    if (!fname.endsWith('.yaml') && !fname.endsWith('.yml')) {
+        orchToast(t('orch_toast_not_yaml'));
+        return;
+    }
+    try {
+        const text = await file.text();
+        // Send YAML text to backend for saving and conversion
+        const r = await fetch('/proxy_visual/upload-yaml', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: fname, content: text }),
+        });
+        const res = await r.json();
+        if (res.error) { orchToast(t('orch_toast_yaml_upload_fail') + ': ' + res.error); return; }
+        // Load the returned layout data
+        if (res.layout) {
+            orchClearCanvas();
+            const data = res.layout;
+            // Restore settings
+            if (data.settings) {
+                document.getElementById('orch-repeat').checked = data.settings.repeat !== false;
+                document.getElementById('orch-rounds').value = data.settings.max_rounds || 5;
+                document.getElementById('orch-bot-session').checked = data.settings.use_bot_session || false;
+                if (data.settings.cluster_threshold) {
+                    document.getElementById('orch-threshold').value = data.settings.cluster_threshold;
+                    document.getElementById('orch-threshold-val').textContent = data.settings.cluster_threshold;
+                }
+            }
+            const idMap = {};
+            (data.nodes || []).forEach(n => {
+                const newNode = orchAddNode(n, n.x, n.y);
+                idMap[n.id] = newNode.id;
+            });
+            (data.edges || []).forEach(e => {
+                const src = idMap[e.source], tgt = idMap[e.target];
+                if (src && tgt) orchAddEdge(src, tgt);
+            });
+            (data.groups || []).forEach(g => {
+                const mapped = { ...g, nodeIds: (g.nodeIds || []).map(nid => idMap[nid]).filter(Boolean) };
+                if (mapped.nodeIds.length > 0) { orch.groups.push(mapped); orchRenderGroup(mapped); }
+            });
+            orchRenderEdges();
+            orchUpdateYaml();
+            orchToast(t('orch_toast_yaml_uploaded', { name: fname }));
+        } else {
+            // Fallback: just show the YAML text
+            document.getElementById('orch-yaml-content').textContent = text;
+            orchToast(t('orch_toast_yaml_uploaded', { name: fname }));
+        }
+    } catch (e) {
+        orchToast(t('orch_toast_yaml_upload_fail') + ': ' + e.message);
+    }
+}
+
+// ── Drag & Drop YAML file onto canvas ──
+function orchSetupFileDrop() {
+    const canvas = document.getElementById('orch-canvas-area');
+    const dropOverlay = document.createElement('div');
+    dropOverlay.id = 'orch-drop-overlay';
+    dropOverlay.className = 'orch-drop-overlay';
+    dropOverlay.innerHTML = '<div class="orch-drop-content"><div style="font-size:48px;">📄</div><div>' + t('orch_drop_hint') + '</div></div>';
+    canvas.style.position = 'relative';
+    canvas.appendChild(dropOverlay);
+
+    let dragCounter = 0;
+
+    canvas.addEventListener('dragenter', e => {
+        // Only show overlay for file drags (not sidebar card drags)
+        if (e.dataTransfer.types.includes('Files')) {
+            e.preventDefault();
+            dragCounter++;
+            dropOverlay.classList.add('visible');
+        }
+    });
+    canvas.addEventListener('dragover', e => {
+        if (e.dataTransfer.types.includes('Files')) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+        }
+    });
+    canvas.addEventListener('dragleave', e => {
+        if (e.dataTransfer.types.includes('Files')) {
+            dragCounter--;
+            if (dragCounter <= 0) {
+                dragCounter = 0;
+                dropOverlay.classList.remove('visible');
+            }
+        }
+    });
+    canvas.addEventListener('drop', e => {
+        dragCounter = 0;
+        dropOverlay.classList.remove('visible');
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            const file = e.dataTransfer.files[0];
+            if (file.name.endsWith('.yaml') || file.name.endsWith('.yml')) {
+                e.preventDefault();
+                e.stopPropagation();
+                orchImportYamlFile(file);
+                return;
+            }
+        }
+        // Let the original drop handler process non-file drags (sidebar cards)
+    }, true);
+}
+
 function orchCopyPrompt() {
     const text = document.getElementById('orch-prompt-content').textContent;
     navigator.clipboard.writeText(text).catch(() => {}); orchToast(t('orch_toast_prompt_copied'));
