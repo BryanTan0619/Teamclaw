@@ -719,6 +719,10 @@ async def get_publicnet_info() -> str:
     so you can share the link with the user (e.g. via Telegram).
     This does NOT read .env directly — it queries the OASIS server API.
 
+    IMPORTANT: This is a READ-ONLY query tool. It does NOT start or download
+    anything. Starting the tunnel or downloading cloudflared MUST only happen
+    when the user EXPLICITLY requests it — never on the agent's own initiative.
+
     Returns:
         Human-readable public network info including tunnel status and public URL.
     """

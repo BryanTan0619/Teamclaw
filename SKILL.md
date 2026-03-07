@@ -11,7 +11,7 @@ compatibility:
   - "ollama"
 
 
-argument-hint: "[BEFORE FIRST LAUNCH - MUST CONFIGURE] (1) LLM_API_KEY: your LLM provider API key (required). (2) LLM_BASE_URL: the base URL of your LLM provider (e.g. https://api.deepseek.com). (3) LLM_MODEL: the model name to use (e.g. deepseek-chat, gpt-4o, gemini-2.5-flash). [AUTO-DETECT] OPENCLAW_SESSIONS_FILE is auto-detected via `openclaw sessions` (Session store line); OPENCLAW_API_URL is auto-detected via `openclaw config get gateway.port`. Both can be manually overridden in .env if needed. (5) OPENCLAW_GATEWAY_TOKEN: the gateway token for accessing OpenClaw via its OpenAI-compatible endpoint (required when orchestrating agents from OpenClaw). [NETWORK] Requires outbound access for LLM/TTS APIs. Uses ports 51200-51209. [BOTS] Optional integrations: TELEGRAM_BOT_TOKEN, QQ_APP_ID, QQ_BOT_SECRET. [TUNNEL] Set PUBLIC_DOMAIN to enable secure Cloudflare Tunneling."
+argument-hint: "[BEFORE FIRST LAUNCH - MUST CONFIGURE] (1) LLM_API_KEY: your LLM provider API key (required). (2) LLM_BASE_URL: the base URL of your LLM provider (e.g. https://api.deepseek.com). (3) LLM_MODEL: the model name to use (e.g. deepseek-chat, gpt-4o, gemini-2.5-flash). [AUTO-DETECT] OPENCLAW_SESSIONS_FILE is auto-detected via `openclaw sessions` (Session store line); OPENCLAW_API_URL is auto-detected via `openclaw config get gateway.port`. Both can be manually overridden in .env if needed. (5) OPENCLAW_GATEWAY_TOKEN: the gateway token for accessing OpenClaw via its OpenAI-compatible endpoint (required when orchestrating agents from OpenClaw). [NETWORK] Requires outbound access for LLM/TTS APIs. Uses ports 51200-51209. [BOTS] Optional integrations: TELEGRAM_BOT_TOKEN, QQ_APP_ID, QQ_BOT_SECRET. [TUNNEL] Set PUBLIC_DOMAIN to enable secure Cloudflare Tunneling. Public deployment is entirely user-controlled (start-tunnel / stop-tunnel / frontend toggle). CRITICAL: Agent MUST NOT download cloudflared or start the tunnel unless the user EXPLICITLY requests it. Agent retrieves public URL via get_publicnet_info() tool (queries GET /publicnet/info), never reads .env directly."
 
 metadata:
   version: "1.0.1"
@@ -1321,16 +1321,25 @@ bash selfskill/scripts/run.sh configure --batch \
 
 ### 3. Cloudflare Tunnel (Optional — for remote access)
 
-To expose the Web UI to the public internet for remote visual workflow programming (e.g., from a mobile phone):
+Public network deployment is **entirely user-controlled** — the system will NEVER expose ports to the public internet without explicit user action.
 
-- The `tunnel.py` script will automatically write `PUBLIC_DOMAIN` into `.env` when a Cloudflare Tunnel is established.
-- No manual configuration is needed — just run the tunnel script and the frontend becomes accessible via HTTPS on the public domain.
-- **Non-blocking start**: `tunnel.py` blocks the terminal by default (main thread joins tunnel threads). To start it without blocking the agent or terminal, run it in the background:
+> **⚠️ CRITICAL RULE FOR AGENTS**: The agent MUST NOT download `cloudflared`, start the tunnel, or execute any public-network-related commands on its own initiative. These actions are ONLY allowed when the user **explicitly** requests them (e.g., "start the tunnel", "enable public access"). The agent should NEVER proactively suggest or auto-start public deployment.
 
-```bash
-nohup python scripts/tunnel.py > logs/tunnel.log 2>&1 &
-sleep 30  # Wait for tunnels to be established and PUBLIC_DOMAIN written to .env
-```
+There are three ways to start/stop the tunnel:
+
+| Method | How |
+|--------|-----|
+| **CLI (via skill script)** | `bash selfskill/scripts/run.sh start-tunnel` / `stop-tunnel` / `tunnel-status` |
+| **Frontend UI** | Settings panel → "🌐 Public Tunnel" section → click Start/Stop button |
+| **Agent (explicit user request ONLY)** | User explicitly asks the agent to start the tunnel → agent runs `bash selfskill/scripts/run.sh start-tunnel` |
+
+When the tunnel starts, `cloudflared` is **auto-downloaded** if not present, and `PUBLIC_DOMAIN` is automatically written to `.env`. Note: the download and startup of `cloudflared` only happen upon explicit user instruction — the agent must never trigger this autonomously.
+
+**How agents/bots obtain the public URL** (without reading `.env` directly):
+
+- **Agent**: calls the MCP tool `get_publicnet_info()`, which queries `GET /publicnet/info` on the OASIS server.
+- **Telegram Bot**: user sends `/tunnel` command, bot queries `GET /publicnet/info` and replies with the public URL.
+- **Direct API**: `curl http://127.0.0.1:51202/publicnet/info` — returns JSON with tunnel status and public domain.
 
 ---
 
@@ -1383,13 +1392,30 @@ bash selfskill/scripts/run.sh configure --batch \
 
 ### 3. Cloudflare Tunnel（可选 — 用于远程访问）
 
-如需将前端 Web UI 通过公网 HTTPS 安全暴露，以便在手机或其他远程设备上进行可视化多 Agent 工作流编排：
+公网部署**完全由用户控制** —— 系统绝不会在未经用户明确操作的情况下将端口暴露到公网。
 
-- 运行 `tunnel.py` 脚本后，Cloudflare Tunnel 会自动建立，并将 `PUBLIC_DOMAIN` 写入 `.env`。
-- 无需手动配置，启动隧道后即可通过 HTTPS 公网域名访问前端。
-- **非阻塞启动**：`tunnel.py` 默认会阻塞终端（主线程 join 等待隧道线程）。如需避免阻塞 Agent 或终端，请后台启动：
+> **⚠️ Agent 关键规则**：Agent **禁止**主动下载 `cloudflared`、启动隧道或执行任何公网部署相关命令。这些操作**仅在用户明确指令**下才允许执行（如"启动隧道"、"开启公网访问"）。Agent 绝不能自行建议或自动启动公网部署。
 
-```bash
-nohup python scripts/tunnel.py > logs/tunnel.log 2>&1 &
-sleep 30  # 等待隧道建立完成，PUBLIC_DOMAIN 写入 .env
+启动/停止隧道有三种方式：
+
+| 方式 | 操作 |
+|------|------|
+| **命令行（skill 脚本）** | `bash selfskill/scripts/run.sh start-tunnel` / `stop-tunnel` / `tunnel-status` |
+| **前端 UI** | Settings 面板 → "🌐 公网隧道" 区域 → 点击启动/停止按钮 |
+| **Agent（仅限用户明确指令）** | 用户明确要求启动隧道 → agent 执行 `bash selfskill/scripts/run.sh start-tunnel` |
+
+启动隧道时，如本地未安装 `cloudflared`，会**自动下载**。隧道建立后 `PUBLIC_DOMAIN` 自动写入 `.env`。注意：`cloudflared` 的下载和启动仅在用户明确指令下发生 —— agent 绝不能自主触发。
+
+**Agent / Bot 如何获取公网地址**（不直接读 `.env`）：
+
+- **Agent**：调用 MCP tool `get_publicnet_info()`，内部请求 OASIS 服务的 `GET /publicnet/info` 接口。
+- **Telegram Bot**：用户发送 `/tunnel` 命令，bot 直接查询 `GET /publicnet/info` 并回复公网地址。
+- **直接 API 调用**：`curl http://127.0.0.1:51202/publicnet/info` —— 返回 JSON 格式的隧道状态和公网域名。
+
+```json
+// GET /publicnet/info 返回示例
+{
+  "tunnel": {"running": true, "pid": 12345, "public_domain": "https://xxx.trycloudflare.com"},
+  "ports": {"frontend": "51209", "oasis": "51202"}
+}
 ```
