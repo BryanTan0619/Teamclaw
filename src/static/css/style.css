@@ -761,9 +761,11 @@ header {
 .file-preview-item .remove-btn { width: 16px; height: 16px; background: #ef4444; color: white; border: none; border-radius: 50%; font-size: 9px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; flex-shrink: 0; }
 .chat-file-tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; background: rgba(255,255,255,0.15); font-size: 12px; margin-bottom: 4px; }
 /* Audio recording button */
-.workflow-add-btn { cursor: pointer; color: #6b7280; transition: all 0.2s; flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 42px; height: 42px; border-radius: 10px; border: 1px solid #e5e7eb; background: #f9fafb; font-size: 18px; }
-.workflow-add-btn:hover { color: #7c3aed; border-color: #c4b5fd; background: #f5f3ff; }
-@media (max-width: 768px) { .workflow-add-btn { width: 36px; height: 36px; font-size: 16px; } }
+.workflow-add-btn { cursor: pointer; color: #5b21b6; transition: all 0.2s; flex-shrink: 0; display: flex; align-items: center; justify-content: center; gap: 4px; height: 42px; padding: 0 12px; border-radius: 10px; border: 2px solid #c4b5fd; background: linear-gradient(135deg, #f5f3ff, #ede9fe); font-size: 14px; line-height: 1; white-space: nowrap; }
+.workflow-add-btn .wf-icon { font-size: 18px; line-height: 1; }
+.workflow-add-btn .wf-label { font-size: 13px; font-weight: 700; color: #6d28d9; line-height: 1; }
+.workflow-add-btn:hover { color: #7c3aed; border-color: #8b5cf6; background: linear-gradient(135deg, #ede9fe, #ddd6fe); box-shadow: 0 2px 8px rgba(124,58,237,0.2); }
+@media (max-width: 768px) { .workflow-add-btn { height: 36px; padding: 0 8px; } .workflow-add-btn .wf-icon { font-size: 16px; } .workflow-add-btn .wf-label { font-size: 11px; } }
 .workflow-tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: 8px; background: #f5f3ff; border: 1px solid #c4b5fd; font-size: 12px; color: #7c3aed; margin-right: 4px; margin-bottom: 4px; }
 .workflow-tag .wf-remove { cursor: pointer; margin-left: 2px; font-size: 10px; color: #a78bfa; }
 .workflow-tag .wf-remove:hover { color: #dc2626; }

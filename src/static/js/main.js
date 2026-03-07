@@ -130,7 +130,7 @@ const i18n = {
         // 页面切换
         tab_chat: '💬 对话',
         tab_group: '👥 群聊',
-        tab_orchestrate: '🎨 编排',
+        tab_orchestrate: '🤝 Agent Teams',
 
         // 群聊
         group_title: '👥 群聊列表',
@@ -299,6 +299,7 @@ orch_openclaw_sessions: '🦞 OpenClaw',
 
         // Add Workflow
         wf_btn_title: '添加工作流',
+        wf_btn_label: '+ 工作流',
         wf_popup_title: '📋 选择工作流',
         wf_no_workflows: '暂无已保存的工作流',
         wf_cancel: '取消',
@@ -468,7 +469,7 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         // Page switch
         tab_chat: '💬 Chat',
         tab_group: '👥 Groups',
-        tab_orchestrate: '🎨 Orchestrate',
+        tab_orchestrate: '🤝 Agent Teams',
 
         // Group chat
         group_title: '👥 Group Chats',
@@ -649,6 +650,7 @@ orch_openclaw_sessions: '🦞 OpenClaw',
 
         // Add Workflow
         wf_btn_title: 'Add Workflow',
+        wf_btn_label: '+ Workflow',
         wf_popup_title: '📋 Select Workflow',
         wf_no_workflows: 'No saved workflows',
         wf_cancel: 'Cancel',
@@ -1141,7 +1143,7 @@ function closeSessionSidebar() {
 }
 
 // Session filter mode: 'oasis' = only show oasis sessions, 'other' = only show non-oasis sessions
-let sessionFilterMode = 'oasis';
+let sessionFilterMode = 'other';
 
 function isOasisSession(sessionId) {
     return sessionId && sessionId.includes('#oasis#');
@@ -1156,7 +1158,7 @@ function toggleOasisSessionsVisible() {
     sessionFilterMode = sessionFilterMode === 'oasis' ? 'other' : 'oasis';
     const btn = document.getElementById('toggle-oasis-sessions-btn');
     if (btn) {
-        btn.textContent = sessionFilterMode === 'oasis' ? '🏛️ OASIS' : '💬 会话';
+        btn.textContent = sessionFilterMode === 'oasis' ? '🏛️ 切换到普通会话' : '🏛️ 切换到 OASIS';
     }
     // Apply filter to all session items
     document.querySelectorAll('.session-item[data-session-id]').forEach(el => {
@@ -2412,7 +2414,7 @@ function renderWorkflowPreviews() {
     if (!pendingWorkflows.length) { area.style.display = 'none'; return; }
     area.style.display = 'flex';
     area.innerHTML = pendingWorkflows.map((wf, i) =>
-        `<span class="workflow-tag">📋 ${escapeHtml(wf.name)}<span class="wf-remove" onclick="removeWorkflow(${i})">&times;</span></span>`
+        `<span class="workflow-tag">📋 Workflow: ${escapeHtml(wf.name)}<span class="wf-remove" onclick="removeWorkflow(${i})">&times;</span></span>`
     ).join('');
 }
 
