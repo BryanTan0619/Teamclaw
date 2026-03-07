@@ -849,6 +849,10 @@ class ExternalExpert:
                 msg["content"] = msg["content"] + self._OASIS_REPLY_INSTRUCTION
                 return
 
+    # Flexible regex patterns for oasis reply tags (accept variants like [/oasis reply end])
+    _OASIS_START_RE = re.compile(r"\[/?oasis\s+reply\s+/?start\]", re.IGNORECASE)
+    _OASIS_END_RE = re.compile(r"\[/?oasis\s+reply\s+/?end\]", re.IGNORECASE)
+
     @staticmethod
     def _extract_oasis_reply(text: str, start_tag: str, end_tag: str) -> tuple[str, str | None]:
         """Parse a single reply for [oasis reply start/end] tags.
@@ -858,14 +862,13 @@ class ExternalExpert:
           - ("started", after_start)  — start found but no end, returns content after start
           - ("missing", None)         — no start tag found
         """
-        low = text.lower()
-        s = low.find(start_tag)
-        if s < 0:
+        sm = ExternalExpert._OASIS_START_RE.search(text)
+        if sm is None:
             return ("missing", None)
-        after = text[s + len(start_tag):]
-        e = after.lower().find(end_tag)
-        if e >= 0:
-            return ("complete", after[:e].strip())
+        after = text[sm.end():]
+        em = ExternalExpert._OASIS_END_RE.search(after)
+        if em is not None:
+            return ("complete", after[:em.start()].strip())
         return ("started", after.strip())
 
     async def _call_api_with_oasis_check(self, messages: list[dict], **kwargs) -> str:
@@ -912,7 +915,7 @@ class ExternalExpert:
 
             # Feed reply back into conversation for next attempt
             messages.append({"role": "assistant", "content": raw_reply})
-            messages.append({"role": "user", "content": "请继续。如果你已经结束发言，请添加 [oasis reply end] 标签。"})
+            messages.append({"role": "user", "content": "请继续。如果你已经结束发言，请添加 [oasis reply end] 标签。如果你已回复，请重新按照格式严格回复。"})
 
         # All attempts exhausted — return everything we collected
         print(f"  [OASIS] ⚠️ {self.name} {self._OASIS_REPLY_MAX_RETRIES} calls without "
