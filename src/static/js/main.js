@@ -2345,17 +2345,17 @@ async function showWorkflowPopup() {
                 btn.disabled = false;
                 btn.style.opacity = '1';
             });
-            item.addEventListener('dblclick', () => {
+            item.addEventListener('dblclick', async () => {
                 selectedName = name;
-                addWorkflowToContext(selectedName);
+                await addWorkflowToContext(selectedName);
                 overlay.remove();
             });
             listEl.appendChild(item);
         }
 
-        overlay.querySelector('#wf-confirm-btn').addEventListener('click', () => {
+        overlay.querySelector('#wf-confirm-btn').addEventListener('click', async () => {
             if (selectedName) {
-                addWorkflowToContext(selectedName);
+                await addWorkflowToContext(selectedName);
                 overlay.remove();
             }
         });
@@ -2364,14 +2364,30 @@ async function showWorkflowPopup() {
     }
 }
 
-function addWorkflowToContext(name) {
+async function addWorkflowToContext(name) {
     // Avoid duplicate
     if (pendingWorkflows.some(w => w.name === name)) return;
-    pendingWorkflows.push({ name });
+
+    // Load raw YAML content for this workflow
+    let yamlText = '';
+    try {
+        const r = await fetch(`/proxy_visual/load-yaml-raw/${encodeURIComponent(name)}`, {
+            headers: { 'Authorization': 'Bearer ' + getAuthToken() }
+        });
+        const data = await r.json();
+        yamlText = data.yaml || '';
+    } catch(e) {
+        console.warn('Failed to load workflow YAML:', e);
+    }
+
+    pendingWorkflows.push({ name, yaml: yamlText });
     renderWorkflowPreviews();
-    // Also prepend workflow context to input
-    const prefix = t('wf_context_prefix', { name });
-    inputField.value = prefix + inputField.value;
+
+    // Build descriptive prompt with workflow settings and YAML
+    const prompt = `【oasis workflow，use it now】\n` +
+        `Workflow: ${name}\n` +
+        (yamlText ? `---\n${yamlText}\n---\n` : '');
+    inputField.value = prompt + inputField.value;
     inputField.focus();
 }
 

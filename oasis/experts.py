@@ -645,6 +645,14 @@ class ExternalExpert:
     # Regex to match OpenClaw agent model format: agent:<agent_name>
     _OPENCLAW_MODEL_RE = re.compile(r"^agent:([^:]+)$")
 
+    # Oasis reply protocol: require agent to prefix reply with this tag
+    _OASIS_REPLY_TAG = "[oasis reply]"
+    _OASIS_REPLY_INSTRUCTION = (
+        "\n\n⚠️ IMPORTANT: You MUST start your reply with exactly \"[oasis reply]\" "
+        "(including brackets). Replies without this prefix will be ignored."
+    )
+    _OASIS_REPLY_MAX_RETRIES = 3
+
     def __init__(
         self,
         name: str,
@@ -816,6 +824,41 @@ class ExternalExpert:
         except Exception as api_err:
             raise RuntimeError(f"API call failed for {self.name}: {api_err}")
 
+    def _inject_oasis_reply_instruction(self, messages: list[dict]) -> None:
+        """Append [oasis reply] instruction to the last user message (openclaw only)."""
+        if not self._is_openclaw_agent:
+            return
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                msg["content"] = msg["content"] + self._OASIS_REPLY_INSTRUCTION
+                return
+
+    def _validate_oasis_reply(self, reply: str) -> str | None:
+        """Check if reply starts with [oasis reply] tag. Return stripped content or None."""
+        if not self._is_openclaw_agent:
+            return reply
+        stripped = reply.strip()
+        if stripped.lower().startswith(self._OASIS_REPLY_TAG):
+            return stripped[len(self._OASIS_REPLY_TAG):].strip()
+        return None
+
+    async def _call_api_with_oasis_check(self, messages: list[dict], **kwargs) -> str:
+        """Call API with [oasis reply] validation. Retry if tag missing (openclaw only)."""
+        self._inject_oasis_reply_instruction(messages)
+        for attempt in range(1, self._OASIS_REPLY_MAX_RETRIES + 1):
+            raw_reply = await self._call_api(messages, **kwargs)
+            validated = self._validate_oasis_reply(raw_reply)
+            if validated is not None:
+                return validated
+            print(f"  [OASIS] ⚠️ {self.name} reply missing [oasis reply] tag "
+                  f"(attempt {attempt}/{self._OASIS_REPLY_MAX_RETRIES}), retrying...")
+            messages.append({"role": "assistant", "content": raw_reply})
+            messages.append({"role": "user",
+                             "content": "Your reply MUST start with \"[oasis reply]\". Please try again."})
+        # Last attempt failed — use raw reply as fallback
+        print(f"  [OASIS] ⚠️ {self.name} gave up waiting for [oasis reply] tag, using raw reply")
+        return raw_reply
+
     async def participate(self, forum: DiscussionForum, instruction: str = "", discussion: bool = True):
         others = await forum.browse(viewer=self.name, exclude_self=True)
 
@@ -846,7 +889,7 @@ class ExternalExpert:
                 messages.append({"role": "user", "content": "\n".join(ctx_parts)})
 
             try:
-                reply = await self._call_api(messages, timeout_override=None)
+                reply = await self._call_api_with_oasis_check(messages, timeout_override=None)
                 await forum.publish(author=self.name, content=reply.strip()[:2000])
                 print(f"  [OASIS] ✅ {self.name} (external) 执行完成")
             except Exception as e:
@@ -898,7 +941,7 @@ class ExternalExpert:
             messages.append({"role": "user", "content": prompt})
 
         try:
-            reply = await self._call_api(messages)
+            reply = await self._call_api_with_oasis_check(messages)
             result = _parse_expert_response(reply)
             await _apply_response(result, self.name, forum, others)
         except json.JSONDecodeError as e:

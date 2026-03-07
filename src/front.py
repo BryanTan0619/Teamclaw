@@ -955,6 +955,23 @@ def proxy_visual_load_layout(name):
         return jsonify({"error": f"YAML-to-layout conversion failed: {e}"}), 500
 
 
+@app.route("/proxy_visual/load-yaml-raw/<name>", methods=["GET"])
+def proxy_visual_load_yaml_raw(name):
+    """Return raw YAML text for a saved workflow."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "Not logged in"}), 401
+    safe = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
+    yaml_dir = os.path.join(root_dir, "data", "user_files", user_id, "oasis", "yaml")
+    fpath = os.path.join(yaml_dir, f"{safe}.yaml")
+    if not os.path.isfile(fpath):
+        fpath = os.path.join(yaml_dir, f"{safe}.yml")
+    if not os.path.isfile(fpath):
+        return jsonify({"error": "Not found"}), 404
+    with open(fpath, "r", encoding="utf-8") as f:
+        return jsonify({"yaml": f.read()})
+
+
 @app.route("/proxy_visual/delete-layout/<name>", methods=["DELETE"])
 def proxy_visual_delete_layout(name):
     """Delete a saved YAML workflow."""
