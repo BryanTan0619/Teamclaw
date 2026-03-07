@@ -117,6 +117,13 @@
                     </button>
                     <button onclick="toggleLanguage()" id="lang-toggle-btn" class="text-[10px] sm:text-xs bg-purple-50 text-purple-600 hover:bg-purple-100 px-2 py-1 rounded border border-purple-200 transition-colors" title="Switch Language">EN</button>
                     <button onclick="openSettings()" class="desktop-only-btn text-[10px] sm:text-xs bg-gray-50 text-gray-600 hover:bg-gray-100 px-2 py-1 rounded border border-gray-200 transition-colors" data-i18n="settings" data-i18n-title="settings_title" title="系统设置">⚙️</button>
+                    <div id="public-toggle-wrap" class="desktop-only-btn" style="display:inline-flex;align-items:center;gap:4px;">
+                        <span style="font-size:10px;color:#888;" id="public-toggle-label">🌐</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="public-toggle" onchange="handlePublicToggle(this.checked)" disabled>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
                     <button onclick="handleLogout()" class="desktop-only-btn text-[10px] sm:text-xs text-gray-400 hover:text-red-500 px-1.5 sm:px-2 py-1 rounded transition-colors" data-i18n="logout" data-i18n-title="logout" title="切换用户">退出</button>
                     <!-- Mobile: hamburger menu -->
                     <div class="mobile-menu-wrapper" style="position:relative;">

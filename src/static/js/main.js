@@ -1781,6 +1781,52 @@ async function restartServices() {
     }
 }
 
+// ===== Public Toggle (header shortcut for tunnel) =====
+async function _syncPublicToggle() {
+    const toggle = document.getElementById('public-toggle');
+    const label = document.getElementById('public-toggle-label');
+    if (!toggle) return;
+    try {
+        const r = await fetch('/proxy_tunnel/status');
+        const data = await r.json();
+        toggle.checked = !!data.running;
+        toggle.disabled = false;
+        if (data.running && data.public_domain) {
+            label.textContent = '🌐 ' + data.public_domain.replace(/^https?:\/\//, '').slice(0, 28);
+            label.title = data.public_domain;
+        } else {
+            label.textContent = '🌐 Public';
+            label.title = '';
+        }
+    } catch (e) {
+        toggle.disabled = true;
+    }
+}
+
+async function handlePublicToggle(checked) {
+    const toggle = document.getElementById('public-toggle');
+    const label = document.getElementById('public-toggle-label');
+    toggle.disabled = true;
+    label.textContent = checked ? '🌐 Starting...' : '🌐 Stopping...';
+    try {
+        const endpoint = checked ? '/proxy_tunnel/start' : '/proxy_tunnel/stop';
+        await fetch(endpoint, { method: 'POST' });
+        // Poll for status update
+        const maxPolls = checked ? 30 : 10;
+        const interval = checked ? 2000 : 1000;
+        for (let i = 0; i < maxPolls; i++) {
+            await new Promise(r => setTimeout(r, interval));
+            const sr = await fetch('/proxy_tunnel/status');
+            const sd = await sr.json();
+            if (checked && sd.running) break;
+            if (!checked && !sd.running) break;
+        }
+    } catch (e) { /* ignore */ }
+    await _syncPublicToggle();
+    // Also refresh the tunnel section inside settings body if present
+    if (typeof _refreshTunnelStatus === 'function') _refreshTunnelStatus();
+}
+
 // ===== Tunnel Control =====
 let _tunnelRunning = false;
 
@@ -1979,6 +2025,7 @@ async function loadTools() {
                     loadTools();
                     refreshOasisTopics();
                     startHistoryPolling();
+                    _syncPublicToggle();
                     return;
                 }
             }
