@@ -1045,5 +1045,116 @@ def proxy_visual_sessions_status():
         return jsonify([])
 
 
+# ===== Tunnel Control API =====
+
+import subprocess as _subprocess
+import signal as _signal
+
+_TUNNEL_PIDFILE = os.path.join(root_dir, ".tunnel.pid")
+_TUNNEL_SCRIPT = os.path.join(root_dir, "scripts", "tunnel.py")
+
+
+def _tunnel_running() -> tuple[bool, int | None]:
+    """Check if tunnel is running, return (running, pid)."""
+    if not os.path.isfile(_TUNNEL_PIDFILE):
+        return False, None
+    try:
+        with open(_TUNNEL_PIDFILE) as f:
+            pid = int(f.read().strip())
+        os.kill(pid, 0)  # check if alive
+        return True, pid
+    except (ValueError, OSError):
+        return False, None
+
+
+def _get_public_domain() -> str:
+    """Read PUBLIC_DOMAIN from .env."""
+    from dotenv import dotenv_values
+    vals = dotenv_values(os.path.join(root_dir, "config", ".env"))
+    domain = vals.get("PUBLIC_DOMAIN", "")
+    if domain == "wait to set":
+        return ""
+    return domain
+
+
+@app.route("/proxy_tunnel/status", methods=["GET"])
+def proxy_tunnel_status():
+    """Return tunnel running status and public URL."""
+    running, pid = _tunnel_running()
+    domain = _get_public_domain() if running else ""
+    return jsonify({"running": running, "pid": pid, "public_domain": domain})
+
+
+@app.route("/proxy_tunnel/start", methods=["POST"])
+def proxy_tunnel_start():
+    """Start cloudflare tunnel in background."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+
+    running, pid = _tunnel_running()
+    if running:
+        domain = _get_public_domain()
+        return jsonify({"status": "already_running", "pid": pid, "public_domain": domain})
+
+    # Start tunnel.py in background
+    log_dir = os.path.join(root_dir, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, "tunnel.log")
+
+    try:
+        import sys as _sys
+        proc = _subprocess.Popen(
+            [_sys.executable, _TUNNEL_SCRIPT],
+            stdout=open(log_file, "w"),
+            stderr=_subprocess.STDOUT,
+            cwd=root_dir,
+            start_new_session=True,
+        )
+        with open(_TUNNEL_PIDFILE, "w") as f:
+            f.write(str(proc.pid))
+        return jsonify({"status": "started", "pid": proc.pid})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/proxy_tunnel/stop", methods=["POST"])
+def proxy_tunnel_stop():
+    """Stop the running tunnel."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+
+    running, pid = _tunnel_running()
+    if not running:
+        # Clean up stale pidfile
+        if os.path.isfile(_TUNNEL_PIDFILE):
+            os.remove(_TUNNEL_PIDFILE)
+        return jsonify({"status": "not_running"})
+
+    try:
+        os.kill(pid, _signal.SIGTERM)
+        # Wait briefly for exit
+        import time as _time
+        for _ in range(10):
+            try:
+                os.kill(pid, 0)
+                _time.sleep(0.5)
+            except OSError:
+                break
+        else:
+            # Force kill
+            try:
+                os.kill(pid, _signal.SIGKILL)
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+    if os.path.isfile(_TUNNEL_PIDFILE):
+        os.remove(_TUNNEL_PIDFILE)
+    return jsonify({"status": "stopped"})
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT_FRONTEND", "51209")), debug=False, threaded=True)

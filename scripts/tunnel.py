@@ -61,12 +61,43 @@ def detect_platform():
 
 
 def download_url(os_name, arch):
-    """根据平台返回 cloudflared 下载 URL（仅提供链接，不自动下载）"""
+    """根据平台返回 cloudflared 下载 URL"""
     if os_name == "linux":
         return f"https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-{arch}"
     elif os_name == "darwin":
-        # macOS 只提供 amd64 版本（arm64 通过 Rosetta 2 兼容）
         return "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-amd64.tgz"
+
+
+def _download_cloudflared():
+    """自动下载 cloudflared 到 bin/ 目录，返回路径或 None"""
+    os_name, arch = detect_platform()
+    url = download_url(os_name, arch)
+    if not url:
+        return None
+
+    print(f"📥 正在自动下载 cloudflared ({os_name}/{arch})...")
+    print(f"   URL: {url}")
+
+    try:
+        import urllib.request
+        if os_name == "darwin":
+            # macOS: 下载 tgz 并解压
+            tgz_path = os.path.join(BIN_DIR, "cloudflared.tgz")
+            urllib.request.urlretrieve(url, tgz_path)
+            import tarfile
+            with tarfile.open(tgz_path, "r:gz") as tar:
+                tar.extract("cloudflared", BIN_DIR)
+            os.remove(tgz_path)
+        else:
+            # Linux: 直接下载二进制
+            urllib.request.urlretrieve(url, CLOUDFLARED_PATH)
+
+        os.chmod(CLOUDFLARED_PATH, 0o755)
+        print(f"✅ cloudflared 已下载到: {CLOUDFLARED_PATH}")
+        return CLOUDFLARED_PATH
+    except Exception as e:
+        print(f"❌ 自动下载失败: {e}")
+        return None
 
 
 def get_cloudflared_install_guide(os_name, arch):
@@ -109,7 +140,7 @@ def get_cloudflared_install_guide(os_name, arch):
 
 
 def ensure_cloudflared():
-    """确保 cloudflared 可用，找不到时提示用户手动安装"""
+    """确保 cloudflared 可用：优先查找已有 → 自动下载 → 失败则打印手动指南"""
     # 优先检查 bin/ 目录
     if os.path.isfile(CLOUDFLARED_PATH) and os.access(CLOUDFLARED_PATH, os.X_OK):
         print(f"✅ 已找到 cloudflared: {CLOUDFLARED_PATH}")
@@ -121,10 +152,14 @@ def ensure_cloudflared():
         print(f"✅ 已找到系统 cloudflared: {system_cf}")
         return system_cf
 
-    # 都没有，提示用户手动安装
+    # 尝试自动下载
+    path = _download_cloudflared()
+    if path:
+        return path
+
+    # 下载失败，打印手动安装指南
     os_name, arch = detect_platform()
-    
-    print("❌ 未找到 cloudflared")
+    print("❌ 未找到且自动下载失败")
     print("=" * 60)
     print(get_cloudflared_install_guide(os_name, arch))
     print("=" * 60)

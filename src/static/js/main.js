@@ -328,6 +328,14 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         settings_group_ports: '端口配置',
         settings_group_bots: '机器人集成',
         settings_group_other: '其他',
+        settings_group_tunnel: '🌐 公网隧道',
+        tunnel_start: '启动隧道',
+        tunnel_stop: '停止隧道',
+        tunnel_starting: '启动中...',
+        tunnel_stopping: '停止中...',
+        tunnel_running: '✅ 隧道运行中',
+        tunnel_stopped: '❌ 隧道未运行',
+        tunnel_url_hint: '点击复制公网地址',
     },
     'en': {
         // General
@@ -670,6 +678,14 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         settings_group_ports: 'Ports',
         settings_group_bots: 'Bot Integration',
         settings_group_other: 'Other',
+        settings_group_tunnel: '🌐 Public Tunnel',
+        tunnel_start: 'Start Tunnel',
+        tunnel_stop: 'Stop Tunnel',
+        tunnel_starting: 'Starting...',
+        tunnel_stopping: 'Stopping...',
+        tunnel_running: '✅ Tunnel Running',
+        tunnel_stopped: '❌ Tunnel Not Running',
+        tunnel_url_hint: 'Click to copy public URL',
     }
 };
 
@@ -1607,6 +1623,20 @@ async function openSettings() {
 function renderSettings(settings) {
     const body = document.getElementById('settings-body');
     let html = `<div class="settings-hint">${t('settings_restart_hint')}</div>`;
+
+    // Tunnel control section
+    html += `<div class="settings-group">`;
+    html += `<div class="settings-group-title" onclick="this.parentElement.classList.toggle('collapsed')">${t('settings_group_tunnel')} <span class="settings-chevron">▼</span></div>`;
+    html += `<div class="settings-group-body">`;
+    html += `<div class="settings-field" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">`;
+    html += `<span id="tunnel-status-text" style="font-size:13px;color:#888;">⏳ ${t('loading')}...</span>`;
+    html += `<button id="tunnel-toggle-btn" onclick="toggleTunnel()" style="padding:4px 14px;border-radius:6px;border:1px solid #444;background:#222;color:#ddd;cursor:pointer;font-size:12px;" disabled>${t('tunnel_start')}</button>`;
+    html += `</div>`;
+    html += `<div id="tunnel-url-row" style="display:none;margin-top:6px;">`;
+    html += `<input id="tunnel-url-input" class="settings-input" type="text" readonly style="font-size:12px;color:#6cf;cursor:pointer;" onclick="this.select();document.execCommand('copy')" />`;
+    html += `</div>`;
+    html += `</div></div>`;
+
     for (const [gid, group] of Object.entries(SETTINGS_GROUPS)) {
         const hasValues = group.keys.some(k => settings[k] !== undefined && settings[k] !== '');
         html += `<div class="settings-group">`;
@@ -1623,6 +1653,8 @@ function renderSettings(settings) {
         html += `</div></div>`;
     }
     body.innerHTML = html;
+    // Fetch tunnel status after render
+    _refreshTunnelStatus();
 }
 
 function escapeHtml(str) {
@@ -1673,6 +1705,82 @@ async function saveSettings() {
     } catch (e) {
         alert(t('settings_save_fail') + ': ' + e.message);
     }
+}
+
+// ===== Tunnel Control =====
+let _tunnelRunning = false;
+
+async function _refreshTunnelStatus() {
+    try {
+        const r = await fetch('/proxy_tunnel/status');
+        const data = await r.json();
+        _tunnelRunning = data.running;
+        const statusEl = document.getElementById('tunnel-status-text');
+        const btn = document.getElementById('tunnel-toggle-btn');
+        const urlRow = document.getElementById('tunnel-url-row');
+        const urlInput = document.getElementById('tunnel-url-input');
+        if (!statusEl) return;
+
+        if (data.running) {
+            statusEl.textContent = t('tunnel_running');
+            statusEl.style.color = '#6cf';
+            btn.textContent = t('tunnel_stop');
+            btn.style.background = '#622';
+            btn.style.borderColor = '#a44';
+            btn.disabled = false;
+            if (data.public_domain) {
+                urlRow.style.display = 'block';
+                urlInput.value = data.public_domain;
+                urlInput.title = t('tunnel_url_hint');
+            } else {
+                urlRow.style.display = 'none';
+            }
+        } else {
+            statusEl.textContent = t('tunnel_stopped');
+            statusEl.style.color = '#888';
+            btn.textContent = t('tunnel_start');
+            btn.style.background = '#222';
+            btn.style.borderColor = '#444';
+            btn.disabled = false;
+            urlRow.style.display = 'none';
+        }
+    } catch (e) {
+        const statusEl = document.getElementById('tunnel-status-text');
+        if (statusEl) {
+            statusEl.textContent = '⚠️ ' + e.message;
+            statusEl.style.color = '#f88';
+        }
+    }
+}
+
+async function toggleTunnel() {
+    const btn = document.getElementById('tunnel-toggle-btn');
+    btn.disabled = true;
+
+    if (_tunnelRunning) {
+        btn.textContent = t('tunnel_stopping');
+        try {
+            await fetch('/proxy_tunnel/stop', { method: 'POST' });
+        } catch (e) { /* ignore */ }
+        // Poll until stopped
+        for (let i = 0; i < 10; i++) {
+            await new Promise(r => setTimeout(r, 1000));
+            await _refreshTunnelStatus();
+            if (!_tunnelRunning) break;
+        }
+    } else {
+        btn.textContent = t('tunnel_starting');
+        try {
+            await fetch('/proxy_tunnel/start', { method: 'POST' });
+        } catch (e) { /* ignore */ }
+        // Poll until running with URL
+        for (let i = 0; i < 30; i++) {
+            await new Promise(r => setTimeout(r, 2000));
+            await _refreshTunnelStatus();
+            if (_tunnelRunning) break;
+        }
+    }
+    btn.disabled = false;
 }
 
 function handleLogout() {
