@@ -213,29 +213,30 @@ AI_MODEL_TG=gemini-2.0-flash
 """
 
 
-def _enable_openclaw_chat_completions():
-    """确保 OpenClaw 的 ChatCompletions 端点已开启"""
-    try:
-        result = subprocess.run(
-            ["openclaw", "config", "set",
-             "gateway.http.endpoints.chatCompletions.enabled", "true"],
-            capture_output=True, text=True, timeout=10
-        )
-        if result.returncode == 0:
-            print("✅ OpenClaw ChatCompletions 端点已开启")
-        else:
-            print(f"⚠️  开启 ChatCompletions 端点失败: {result.stderr.strip()}")
-    except FileNotFoundError:
-        pass  # openclaw 不存在，后续 detect 会统一报错
-    except subprocess.TimeoutExpired:
-        print("⚠️  openclaw config set 命令超时")
-    except Exception as e:
-        print(f"⚠️  开启 ChatCompletions 端点失败: {e}")
+# def _enable_openclaw_chat_completions():
+#     """确保 OpenClaw 的 ChatCompletions 端点已开启"""
+#     # 不再需要：OpenClaw agent 现已优先使用 CLI 调用，无需开启 OpenAI 兼容端口
+#     try:
+#         result = subprocess.run(
+#             ["openclaw", "config", "set",
+#              "gateway.http.endpoints.chatCompletions.enabled", "true"],
+#             capture_output=True, text=True, timeout=10
+#         )
+#         if result.returncode == 0:
+#             print("✅ OpenClaw ChatCompletions 端点已开启")
+#         else:
+#             print(f"⚠️  开启 ChatCompletions 端点失败: {result.stderr.strip()}")
+#     except FileNotFoundError:
+#         pass  # openclaw 不存在，后续 detect 会统一报错
+#     except subprocess.TimeoutExpired:
+#         print("⚠️  openclaw config set 命令超时")
+#     except Exception as e:
+#         print(f"⚠️  开启 ChatCompletions 端点失败: {e}")
 
 
 def detect_openclaw_api_url():
-    """确保 ChatCompletions 已开启，然后通过 gateway.port 自动探测 OPENCLAW_API_URL"""
-    _enable_openclaw_chat_completions()
+    """通过 gateway.port 自动探测 OPENCLAW_API_URL（仅作为 HTTP 回退备用）"""
+    # _enable_openclaw_chat_completions()  # 不再需要：CLI 优先，无需开启 OpenAI 端口
     try:
         result = subprocess.run(
             ["openclaw", "config", "get", "gateway.port"],
