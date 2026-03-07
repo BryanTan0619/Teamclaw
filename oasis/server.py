@@ -822,6 +822,54 @@ async def list_openclaw_agents(filter: str = Query("")):
     }
 
 
+# --- System Info ---
+
+_TUNNEL_PIDFILE = os.path.join(_project_root, ".tunnel.pid")
+
+
+def _tunnel_running() -> tuple[bool, int | None]:
+    """Check if the cloudflare tunnel process is alive."""
+    if not os.path.isfile(_TUNNEL_PIDFILE):
+        return False, None
+    try:
+        with open(_TUNNEL_PIDFILE) as f:
+            pid = int(f.read().strip())
+        os.kill(pid, 0)
+        return True, pid
+    except (ValueError, OSError):
+        return False, None
+
+
+@app.get("/publicnet/info")
+async def publicnet_info():
+    """Return public network info: tunnel status, public domain, ports, etc.
+
+    This is the canonical way for agents / bots to discover the public URL
+    without needing direct access to .env files.
+    """
+    running, pid = _tunnel_running()
+    domain = ""
+    if running:
+        domain = _get_env("PUBLIC_DOMAIN", "")
+        if domain == "wait to set":
+            domain = ""
+
+    frontend_port = _get_env("PORT_FRONTEND", "51209")
+    oasis_port = _get_env("PORT_OASIS", "51202")
+
+    return {
+        "tunnel": {
+            "running": running,
+            "pid": pid,
+            "public_domain": domain,
+        },
+        "ports": {
+            "frontend": frontend_port,
+            "oasis": oasis_port,
+        },
+    }
+
+
 # --- Entrypoint ---
 if __name__ == "__main__":
     port = int(os.getenv("PORT_OASIS", "51202"))

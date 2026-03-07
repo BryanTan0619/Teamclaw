@@ -707,6 +707,60 @@ async def list_oasis_workflows(username: str = "") -> str:
 
 
 # ======================================================================
+# Public Network Info (tunnel / public domain)
+# ======================================================================
+
+@mcp.tool()
+async def get_publicnet_info() -> str:
+    """
+    Get public network information — tunnel status, public domain URL, ports, etc.
+
+    Use this to discover the public URL when the cloudflare tunnel is running,
+    so you can share the link with the user (e.g. via Telegram).
+    This does NOT read .env directly — it queries the OASIS server API.
+
+    Returns:
+        Human-readable public network info including tunnel status and public URL.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(f"{OASIS_BASE_URL}/publicnet/info")
+            if resp.status_code != 200:
+                return f"❌ 查询失败: {resp.text}"
+            data = resp.json()
+
+        tunnel = data.get("tunnel", {})
+        ports = data.get("ports", {})
+
+        lines = ["📡 系统信息\n"]
+
+        # Tunnel info
+        if tunnel.get("running"):
+            lines.append("🌐 公网隧道: ✅ 运行中")
+            domain = tunnel.get("public_domain", "")
+            if domain:
+                lines.append(f"   公网地址: {domain}")
+            else:
+                lines.append("   ⏳ 公网地址尚未就绪")
+            lines.append(f"   PID: {tunnel.get('pid')}")
+        else:
+            lines.append("🌐 公网隧道: ❌ 未运行")
+            lines.append("   💡 可通过 selfskill/scripts/run.sh start-tunnel 启动")
+            lines.append("   💡 或在前端 Settings 面板中点击「启动隧道」")
+
+        # Ports
+        lines.append(f"\n📌 端口:")
+        lines.append(f"   前端: {ports.get('frontend', '?')}")
+        lines.append(f"   OASIS: {ports.get('oasis', '?')}")
+
+        return "\n".join(lines)
+    except httpx.ConnectError:
+        return _CONN_ERR
+    except Exception as e:
+        return f"❌ 查询失败: {e}"
+
+
+# ======================================================================
 # YAML → Layout conversion helpers
 # ======================================================================
 

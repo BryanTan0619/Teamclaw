@@ -81,10 +81,13 @@ import logging
 import httpx
 import base64
 from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
+from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, CommandHandler, filters
 
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+
+# OASIS server URL for system info queries
+OASIS_URL = os.getenv("OASIS_BASE_URL", "http://127.0.0.1:51202")
 
 
 async def download_as_b64(file_id: str, context: ContextTypes.DEFAULT_TYPE) -> str:
@@ -93,6 +96,40 @@ async def download_as_b64(file_id: str, context: ContextTypes.DEFAULT_TYPE) -> s
     async with httpx.AsyncClient() as client:
         response = await client.get(file.file_path)
         return base64.b64encode(response.content).decode('utf-8')
+
+
+async def handle_tunnel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /tunnel command — query and display tunnel status + public URL."""
+    entry = _lookup_user(update)
+    if entry is None:
+        _reload_whitelist()
+        if _whitelist_cache["entries"] or _whitelist_cache["tg_name_map"]:
+            await update.message.reply_text("⛔ 你没有权限使用此机器人。")
+            return
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(f"{OASIS_URL}/publicnet/info")
+            if resp.status_code != 200:
+                await update.message.reply_text(f"❌ 查询失败: {resp.status_code}")
+                return
+            data = resp.json()
+
+        tunnel = data.get("tunnel", {})
+        if tunnel.get("running"):
+            domain = tunnel.get("public_domain", "")
+            if domain:
+                text = f"🌐 公网隧道运行中\n\n📎 地址: {domain}\n\n💡 在手机浏览器中打开即可访问前端"
+            else:
+                text = "🌐 隧道运行中，但公网地址尚未就绪，请稍后再试"
+        else:
+            text = "❌ 公网隧道未运行\n\n💡 可通过 Agent 或前端 Settings 启动隧道"
+
+        await update.message.reply_text(text)
+    except httpx.ConnectError:
+        await update.message.reply_text("❌ 无法连接 OASIS 服务，请确认服务已启动")
+    except Exception as e:
+        await update.message.reply_text(f"❌ 查询失败: {e}")
 
 
 async def handle_multimodal(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -191,6 +228,9 @@ if __name__ == '__main__':
         exit(1)
 
     application = ApplicationBuilder().token(TG_TOKEN).build()
+
+    # /tunnel command — quick tunnel status query
+    application.add_handler(CommandHandler("tunnel", handle_tunnel_command))
 
     handler = MessageHandler(
         (filters.TEXT | filters.PHOTO | filters.VOICE) & (~filters.COMMAND),
