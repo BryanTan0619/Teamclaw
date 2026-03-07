@@ -345,6 +345,9 @@
                         <button onclick="toggleOrchFocusMode()" id="orch-focus-btn" class="orch-btn" title="专注模式：隐藏两侧面板"><span data-i18n="orch_btn_focus">🎯 专注</span></button>
                     </div>
                     <div class="orch-canvas" id="orch-canvas-area">
+                        <!-- 移动端 toggle 按钮 -->
+                        <div class="orch-mobile-toggle left" onclick="orchToggleMobileSidebar()">☰</div>
+                        <div class="orch-mobile-toggle right" onclick="orchToggleMobilePanel()">⚙</div>
                         <div class="orch-canvas-inner" id="orch-canvas-inner">
                             <svg id="orch-edge-svg" style="width:10000px;height:10000px;position:absolute;top:0;left:0;z-index:5;pointer-events:none;">
                                 <defs><marker id="orch-arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2563eb" /></marker></defs>
@@ -410,6 +413,8 @@
 
                     <div class="orch-status-bar" id="orch-status-bar" data-i18n="orch_status_bar_init">节点: 0 | 连线: 0 | 分组: 0</div>
                 </div>
+                <!-- 移动端 backdrop -->
+                <div class="orch-mobile-backdrop" id="orch-mobile-backdrop" onclick="orchCloseMobilePanels()"></div>
             </div>
         </div>
         <!-- end of orchestrate-page -->
@@ -528,6 +533,31 @@
         const isFocused = sidebar.classList.toggle('focus-hidden');
         rightPanel.classList.toggle('focus-hidden', isFocused);
         btn.classList.toggle('focus-active', isFocused);
+    }
+
+    // Mobile: toggle sidebar overlay
+    function orchToggleMobileSidebar() {
+        const sidebar = document.querySelector('.orch-sidebar');
+        const panel = document.querySelector('.orch-right-panel');
+        const bd = document.getElementById('orch-mobile-backdrop');
+        panel.classList.remove('mobile-open');
+        sidebar.classList.toggle('mobile-open');
+        bd.classList.toggle('active', sidebar.classList.contains('mobile-open'));
+    }
+    // Mobile: toggle right panel overlay
+    function orchToggleMobilePanel() {
+        const sidebar = document.querySelector('.orch-sidebar');
+        const panel = document.querySelector('.orch-right-panel');
+        const bd = document.getElementById('orch-mobile-backdrop');
+        sidebar.classList.remove('mobile-open');
+        panel.classList.toggle('mobile-open');
+        bd.classList.toggle('active', panel.classList.contains('mobile-open'));
+    }
+    // Mobile: close all panels
+    function orchCloseMobilePanels() {
+        document.querySelector('.orch-sidebar').classList.remove('mobile-open');
+        document.querySelector('.orch-right-panel').classList.remove('mobile-open');
+        document.getElementById('orch-mobile-backdrop').classList.remove('active');
     }
     </script>
 

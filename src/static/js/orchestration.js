@@ -658,6 +658,147 @@ function orchSetupCanvas() {
             if (!orch.panning) canvas.style.cursor = '';
         }
     });
+
+    // ── Touch events (mobile) ──
+    let touchState = null; // { mode:'pan'|'zoom'|'node'|'port', ... }
+
+    canvas.addEventListener('touchstart', e => {
+        if (e.touches.length === 2) {
+            // 双指 → 缩放
+            e.preventDefault();
+            const t0 = e.touches[0], t1 = e.touches[1];
+            const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+            const mx = (t0.clientX + t1.clientX) / 2;
+            const my = (t0.clientY + t1.clientY) / 2;
+            touchState = { mode: 'zoom', initDist: dist, initZoom: orch.zoom, mx, my, initPanX: orch.panX, initPanY: orch.panY };
+            // 取消进行中的单指操作
+            orch.dragging = null; orch.panning = null;
+            return;
+        }
+        if (e.touches.length === 1) {
+            const t = e.touches[0];
+            const target = document.elementFromPoint(t.clientX, t.clientY);
+            if (!target) return;
+
+            // 端口触摸 → 连线
+            if (target.classList.contains('orch-port') && target.dataset.dir === 'out') {
+                e.preventDefault();
+                const nodeId = parseInt(target.dataset.node);
+                const portRect = target.getBoundingClientRect();
+                const cp = orchClientToCanvas(portRect.left + 5, portRect.top + 5);
+                orch.connecting = { sourceId: nodeId, sx: cp.x, sy: cp.y };
+                touchState = { mode: 'port' };
+                return;
+            }
+
+            // 节点触摸 → 拖拽节点
+            const nodeEl = target.closest('.orch-node');
+            if (nodeEl && !target.classList.contains('orch-node-del')) {
+                e.preventDefault();
+                const nodeId = parseInt(nodeEl.id.replace('onode-', ''));
+                const node = orch.nodes.find(n => n.id === nodeId);
+                if (!node) return;
+                if (!orch.selectedNodes.has(nodeId)) orchClearSelection();
+                orchSelectNode(nodeId);
+                const cp = orchClientToCanvas(t.clientX, t.clientY);
+                orch.dragging = { nodeId, offX: cp.x - node.x, offY: cp.y - node.y, multi: orch.selectedNodes.size > 1, starts: {} };
+                if (orch.selectedNodes.size > 1) {
+                    orch.selectedNodes.forEach(nid => { const n = orch.nodes.find(nn=>nn.id===nid); if(n) orch.dragging.starts[nid]={x:n.x,y:n.y}; });
+                }
+                touchState = { mode: 'node' };
+                return;
+            }
+
+            // 空白区触摸 → 画布平移
+            const inner = document.getElementById('orch-canvas-inner');
+            if (target === canvas || target === inner || target.id === 'orch-canvas-hint' || target.closest('.orch-canvas-inner')) {
+                e.preventDefault();
+                orch.panning = { startX: t.clientX, startY: t.clientY, origPanX: orch.panX, origPanY: orch.panY };
+                touchState = { mode: 'pan' };
+            }
+        }
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', e => {
+        if (!touchState) return;
+        e.preventDefault();
+
+        if (touchState.mode === 'zoom' && e.touches.length >= 2) {
+            const t0 = e.touches[0], t1 = e.touches[1];
+            const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+            const scale = dist / touchState.initDist;
+            const newZoom = Math.min(3, Math.max(0.15, touchState.initZoom * scale));
+            // 以初始双指中心为基准缩放
+            const rect = canvas.getBoundingClientRect();
+            const mx = touchState.mx - rect.left;
+            const my = touchState.my - rect.top;
+            orch.zoom = newZoom;
+            orch.panX = mx - (mx - touchState.initPanX) * (newZoom / touchState.initZoom);
+            orch.panY = my - (my - touchState.initPanY) * (newZoom / touchState.initZoom);
+            orchApplyTransform();
+            return;
+        }
+
+        const t = e.touches[0];
+        if (touchState.mode === 'pan' && orch.panning) {
+            const p = orch.panning;
+            orch.panX = p.origPanX + (t.clientX - p.startX);
+            orch.panY = p.origPanY + (t.clientY - p.startY);
+            orchApplyTransform();
+        } else if (touchState.mode === 'node' && orch.dragging) {
+            const d = orch.dragging;
+            const cp = orchClientToCanvas(t.clientX, t.clientY);
+            if (d.multi) {
+                const dx = cp.x - d.offX - d.starts[d.nodeId].x;
+                const dy = cp.y - d.offY - d.starts[d.nodeId].y;
+                orch.selectedNodes.forEach(nid => {
+                    const n = orch.nodes.find(nn=>nn.id===nid);
+                    if (n && d.starts[nid]) { n.x = d.starts[nid].x + dx; n.y = d.starts[nid].y + dy; const el=document.getElementById('onode-'+nid); if(el){el.style.left=n.x+'px';el.style.top=n.y+'px';} }
+                });
+            } else {
+                const n = orch.nodes.find(nn=>nn.id===d.nodeId);
+                if (n) { n.x = cp.x - d.offX; n.y = cp.y - d.offY; const el=document.getElementById('onode-'+n.id); if(el){el.style.left=n.x+'px';el.style.top=n.y+'px';} }
+            }
+            orchRenderEdges();
+            orch.groups.forEach(g => orchUpdateGroupBounds(g));
+        } else if (touchState.mode === 'port' && orch.connecting) {
+            const cp = orchClientToCanvas(t.clientX, t.clientY);
+            orchDrawTempLine(orch.connecting.sx, orch.connecting.sy, cp.x, cp.y);
+        }
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', e => {
+        if (!touchState) return;
+        // 端口连线：检查手指松开处是否在目标端口上
+        if (touchState.mode === 'port' && orch.connecting) {
+            const lastTouch = e.changedTouches[0];
+            const target = document.elementFromPoint(lastTouch.clientX, lastTouch.clientY);
+            if (target && target.classList.contains('orch-port') && target.dataset.dir === 'in') {
+                const targetNodeId = parseInt(target.dataset.node);
+                if (targetNodeId !== orch.connecting.sourceId) {
+                    orchAddEdge(orch.connecting.sourceId, targetNodeId);
+                }
+            }
+            orch.connecting = null;
+            orchRemoveTempLine();
+        }
+        if (touchState.mode === 'node' && orch.dragging) {
+            orch.dragging = null;
+            orchUpdateYaml();
+        }
+        if (touchState.mode === 'pan') {
+            orch.panning = null;
+        }
+        // 双指缩放结束时可能还有一根手指，忽略
+        if (e.touches.length === 0) {
+            touchState = null;
+        }
+    }, { passive: false });
+
+    canvas.addEventListener('touchcancel', () => {
+        orch.dragging = null; orch.panning = null; orch.connecting = null;
+        orchRemoveTempLine(); touchState = null;
+    });
 }
 
 function orchShowContextMenu(x, y, targetNode) {

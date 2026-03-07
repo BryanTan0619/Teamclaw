@@ -618,9 +618,67 @@ header {
 .orch-modal .orch-modal-btns button.primary { background: #2563eb; color: white; border-color: #2563eb; }
 
 @media (max-width: 768px) {
-    .orch-sidebar { display: none; }
-    .orch-right-panel { width: 200px; }
+    /* ── 侧边栏默认隐藏，overlay 滑出 ── */
+    .orch-sidebar {
+        display: flex !important;
+        position: fixed; top: 0; left: 0; z-index: 200;
+        width: 85vw !important; max-width: 360px; height: 100%;
+        transform: translateX(-100%);
+        transition: transform 0.28s cubic-bezier(.4,0,.2,1);
+        box-shadow: none;
+    }
+    .orch-sidebar.mobile-open {
+        transform: translateX(0);
+        box-shadow: 4px 0 24px rgba(0,0,0,0.18);
+    }
+    .orch-right-panel {
+        position: fixed; top: 0; right: 0; z-index: 200;
+        width: 85vw !important; max-width: 300px; height: 100%;
+        transform: translateX(100%);
+        transition: transform 0.28s cubic-bezier(.4,0,.2,1);
+        box-shadow: none;
+    }
+    .orch-right-panel.mobile-open {
+        transform: translateX(0);
+        box-shadow: -4px 0 24px rgba(0,0,0,0.18);
+    }
+    /* backdrop */
+    .orch-mobile-backdrop {
+        display: none; position: fixed; inset: 0; z-index: 199;
+        background: rgba(0,0,0,0.3);
+    }
+    .orch-mobile-backdrop.active { display: block; }
+    /* toggle 按钮 */
+    .orch-mobile-toggle {
+        display: flex !important;
+        position: absolute; z-index: 110;
+        width: 32px; height: 32px; border-radius: 8px;
+        align-items: center; justify-content: center;
+        background: rgba(255,255,255,0.92); border: 1px solid #e5e7eb;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+        font-size: 16px; cursor: pointer; color: #4b5563;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .orch-mobile-toggle:active { background: #e5e7eb; }
+    .orch-mobile-toggle.left { top: 8px; left: 8px; }
+    .orch-mobile-toggle.right { top: 8px; right: 8px; }
+    /* 工具栏更紧凑 */
+    .orch-toolbar { padding: 4px 6px; gap: 2px; }
+    .orch-btn { padding: 3px 6px; font-size: 10px; }
+    /* 导航控件小一点 */
+    .orch-nav-controls { bottom: 8px; right: 8px; }
+    .orch-nav-controls button { width: 22px; height: 22px; font-size: 11px; }
+    /* 画布区域 touch-action */
+    .orch-canvas { touch-action: none; }
+    .orch-canvas-inner { touch-action: none; }
+    /* 节点更容易触摸 */
+    .orch-node { min-width: 100px; padding: 10px 12px; }
+    .orch-port { width: 14px; height: 14px; }
+    .orch-port.port-out { right: -7px; }
+    .orch-port.port-in { left: -7px; }
 }
+/* 桌面端隐藏 toggle 按钮 */
+.orch-mobile-toggle { display: none; }
 
 .main-layout { display: flex; height: var(--app-height, 100vh); max-width: 100%; overflow: hidden; }
 .chat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; height: var(--app-height, 100vh); overflow: hidden; }
