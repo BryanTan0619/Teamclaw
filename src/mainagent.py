@@ -770,6 +770,26 @@ def _read_env_settings() -> dict:
     return settings
 
 
+def _read_env_all() -> dict:
+    """从 .env 文件解析出所有非注释键值对（前端完全掌控用）。"""
+    settings = {}
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key = key.strip()
+                if key:
+                    settings[key] = val.strip()
+    except FileNotFoundError:
+        pass
+    return settings
+
+
 def _mask_value(key: str, val: str) -> str:
     """对敏感字段做掩码。"""
     if key in _MASK_FIELDS and val and len(val) > 8:
@@ -853,6 +873,66 @@ async def update_settings(req: SettingsUpdateRequest):
         return {
             "status": "success",
             "updated": list(filtered.keys()),
+            "hot_applied": hot_applied,
+            "restart_required": restart_needed,
+        }
+
+    return {"status": "success", "updated": [], "hot_applied": [], "restart_required": []}
+
+
+# --- Full Settings API (前端用户完全掌控 .env，不受白名单限制) ---
+
+# 所有包含 KEY / TOKEN / SECRET / PASSWORD 的字段做掩码
+_FULL_MASK_PATTERNS = ("KEY", "TOKEN", "SECRET", "PASSWORD")
+
+
+@app.get("/settings/full")
+async def get_settings_full(user_id: str, password: str):
+    """获取 .env 中所有配置项（敏感值掩码），供前端用户完全掌控。"""
+    if not verify_password(user_id, password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    raw = _read_env_all()
+    masked = {}
+    for k, v in raw.items():
+        if any(p in k.upper() for p in _FULL_MASK_PATTERNS) and v and len(v) > 8:
+            masked[k] = v[:4] + "****" + v[-4:]
+        else:
+            masked[k] = v
+    return {"status": "success", "settings": masked}
+
+
+@app.post("/settings/full")
+async def update_settings_full(req: SettingsUpdateRequest):
+    """更新 .env 任意配置项（前端用户完全掌控），不受白名单限制。"""
+    if not verify_password(req.user_id, req.password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    updates = {}
+    for k, v in req.settings.items():
+        # 跳过掩码值
+        if "****" in str(v):
+            continue
+        updates[k] = str(v)
+
+    if updates:
+        _write_env_settings(updates)
+
+        hot_applied = []
+        restart_needed = []
+        for k, v in updates.items():
+            if k in _HOT_RELOAD_KEYS:
+                os.environ[k] = v
+                hot_applied.append(k)
+            elif k in _RESTART_REQUIRED_KEYS:
+                restart_needed.append(k)
+            else:
+                # 不在任何分类中的 key，也同步到 os.environ（尽力热生效）
+                os.environ[k] = v
+                hot_applied.append(k)
+
+        return {
+            "status": "success",
+            "updated": list(updates.keys()),
             "hot_applied": hot_applied,
             "restart_required": restart_needed,
         }

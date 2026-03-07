@@ -326,8 +326,13 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         settings_group_llm: 'LLM 模型配置',
         settings_group_tts: 'TTS 语音配置',
         settings_group_openclaw: 'OpenClaw 集成',
+        settings_group_oasis: 'OASIS 论坛',
         settings_group_ports: '端口配置',
+        settings_group_network: '公网地址',
         settings_group_bots: '机器人集成',
+        settings_group_comm: '通信模式',
+        settings_group_exec: '命令执行',
+        settings_group_security: '安全密钥',
         settings_group_other: '其他',
         settings_group_tunnel: '🌐 公网隧道',
         tunnel_start: '启动隧道',
@@ -677,8 +682,13 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         settings_group_llm: 'LLM Model',
         settings_group_tts: 'TTS Voice',
         settings_group_openclaw: 'OpenClaw Integration',
+        settings_group_oasis: 'OASIS Forum',
         settings_group_ports: 'Ports',
+        settings_group_network: 'Public URLs',
         settings_group_bots: 'Bot Integration',
+        settings_group_comm: 'Communication Mode',
+        settings_group_exec: 'Command Execution',
+        settings_group_security: 'Security',
         settings_group_other: 'Other',
         settings_group_tunnel: '🌐 Public Tunnel',
         tunnel_start: 'Start Tunnel',
@@ -1595,14 +1605,19 @@ async function handleLogin() {
 }
 
 // ===================== Settings Modal =====================
-const SETTINGS_GROUPS = {
-    llm: { label: 'settings_group_llm', keys: ['LLM_API_KEY', 'LLM_BASE_URL', 'LLM_MODEL', 'LLM_PROVIDER', 'LLM_VISION_SUPPORT'] },
-    tts: { label: 'settings_group_tts', keys: ['TTS_MODEL', 'TTS_VOICE'] },
-    openclaw: { label: 'settings_group_openclaw', keys: ['OPENCLAW_API_URL'] },
-    ports: { label: 'settings_group_ports', keys: ['PORT_AGENT', 'PORT_SCHEDULER', 'PORT_OASIS', 'PORT_FRONTEND', 'PORT_BARK'] },
-    bots: { label: 'settings_group_bots', keys: ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_ALLOWED_USERS', 'QQ_APP_ID', 'QQ_BOT_SECRET', 'QQ_BOT_USERNAME'] },
-    other: { label: 'settings_group_other', keys: ['PUBLIC_DOMAIN', 'OPENAI_STANDARD_MODE', 'ALLOWED_COMMANDS', 'EXEC_TIMEOUT', 'MAX_OUTPUT_LENGTH'] },
-};
+// 预定义分组：已知 key 归入对应分组，其余自动归入"其他"
+const SETTINGS_GROUPS_ORDERED = [
+    { id: 'llm', label: 'settings_group_llm', keys: ['LLM_API_KEY', 'LLM_BASE_URL', 'LLM_MODEL', 'LLM_PROVIDER', 'LLM_VISION_SUPPORT'] },
+    { id: 'tts', label: 'settings_group_tts', keys: ['TTS_MODEL', 'TTS_VOICE'] },
+    { id: 'openclaw', label: 'settings_group_openclaw', keys: ['OPENCLAW_API_URL', 'OPENCLAW_SESSIONS_FILE', 'OPENCLAW_GATEWAY_TOKEN'] },
+    { id: 'oasis', label: 'settings_group_oasis', keys: ['OASIS_BASE_URL'] },
+    { id: 'ports', label: 'settings_group_ports', keys: ['PORT_AGENT', 'PORT_SCHEDULER', 'PORT_OASIS', 'PORT_FRONTEND', 'PORT_BARK'] },
+    { id: 'network', label: 'settings_group_network', keys: ['PUBLIC_DOMAIN', 'BARK_PUBLIC_URL'] },
+    { id: 'bots', label: 'settings_group_bots', keys: ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_ALLOWED_USERS', 'QQ_APP_ID', 'QQ_BOT_SECRET', 'QQ_BOT_USERNAME'] },
+    { id: 'comm', label: 'settings_group_comm', keys: ['OPENAI_STANDARD_MODE'] },
+    { id: 'exec', label: 'settings_group_exec', keys: ['ALLOWED_COMMANDS', 'EXEC_TIMEOUT', 'MAX_OUTPUT_LENGTH'] },
+    { id: 'security', label: 'settings_group_security', keys: ['INTERNAL_TOKEN'] },
+];
 
 let _settingsCache = {};
 
@@ -1612,7 +1627,7 @@ async function openSettings() {
     modal.style.display = 'flex';
     body.innerHTML = `<div class="settings-loading">${t('loading')}</div>`;
     try {
-        const r = await fetch('/proxy_settings');
+        const r = await fetch('/proxy_settings_full');
         const data = await r.json();
         if (data.error || !data.settings) throw new Error(data.error || 'unknown');
         _settingsCache = data.settings;
@@ -1639,24 +1654,44 @@ function renderSettings(settings) {
     html += `</div>`;
     html += `</div></div>`;
 
-    for (const [gid, group] of Object.entries(SETTINGS_GROUPS)) {
-        const hasValues = group.keys.some(k => settings[k] !== undefined && settings[k] !== '');
-        html += `<div class="settings-group">`;
-        html += `<div class="settings-group-title" onclick="this.parentElement.classList.toggle('collapsed')">${t(group.label)} <span class="settings-chevron">▼</span></div>`;
-        html += `<div class="settings-group-body">`;
-        for (const key of group.keys) {
-            const val = settings[key] || '';
-            const isPassword = key.includes('KEY') || key.includes('TOKEN') || key.includes('SECRET');
-            html += `<div class="settings-field">`;
-            html += `<label class="settings-label" title="${key}">${key}</label>`;
-            html += `<input class="settings-input" data-key="${key}" type="${isPassword ? 'password' : 'text'}" value="${escapeHtml(val)}" placeholder="${key}" autocomplete="off" />`;
-            html += `</div>`;
-        }
-        html += `</div></div>`;
+    // Collect all keys from settings
+    const allKeys = Object.keys(settings);
+    const usedKeys = new Set();
+
+    // Render predefined groups
+    for (const group of SETTINGS_GROUPS_ORDERED) {
+        // Include keys that exist in settings OR are defined in group (show placeholder)
+        const groupKeys = group.keys.filter(k => {
+            if (allKeys.includes(k) || true) { usedKeys.add(k); return true; }
+            return false;
+        });
+        html += _renderGroup(t(group.label), groupKeys, settings);
     }
+
+    // Collect remaining keys not in any group → "其他"
+    const otherKeys = allKeys.filter(k => !usedKeys.has(k));
+    if (otherKeys.length > 0) {
+        html += _renderGroup(t('settings_group_other'), otherKeys, settings);
+    }
+
     body.innerHTML = html;
-    // Fetch tunnel status after render
     _refreshTunnelStatus();
+}
+
+function _renderGroup(title, keys, settings) {
+    let html = `<div class="settings-group">`;
+    html += `<div class="settings-group-title" onclick="this.parentElement.classList.toggle('collapsed')">${title} <span class="settings-chevron">▼</span></div>`;
+    html += `<div class="settings-group-body">`;
+    for (const key of keys) {
+        const val = settings[key] || '';
+        const isPassword = /KEY|TOKEN|SECRET|PASSWORD/i.test(key);
+        html += `<div class="settings-field">`;
+        html += `<label class="settings-label" title="${key}">${key}</label>`;
+        html += `<input class="settings-input" data-key="${key}" type="${isPassword ? 'password' : 'text'}" value="${escapeHtml(val)}" placeholder="${key}" autocomplete="off" />`;
+        html += `</div>`;
+    }
+    html += `</div></div>`;
+    return html;
 }
 
 function escapeHtml(str) {
@@ -1674,6 +1709,7 @@ async function saveSettings() {
     const updates = {};
     inputs.forEach(inp => {
         const key = inp.dataset.key;
+        if (!key) return;  // skip readonly tunnel input
         const val = inp.value.trim();
         const orig = _settingsCache[key] || '';
         if (val !== orig) {
@@ -1685,7 +1721,7 @@ async function saveSettings() {
         return;
     }
     try {
-        const r = await fetch('/proxy_settings', {
+        const r = await fetch('/proxy_settings_full', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ settings: updates }),
