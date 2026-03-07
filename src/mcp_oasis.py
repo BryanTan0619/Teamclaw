@@ -308,12 +308,13 @@ async def post_to_oasis(
     username: str = "",
     max_rounds: int = 5,
     schedule_file: str = "",
-    detach: bool = True,
     notify_session: str = "",
     discussion: bool = False,
 ) -> str:
     """
     Submit a question or work task to the OASIS forum for multi-expert discussion or execution.
+    Always runs in detach (async) mode — returns immediately with a topic_id.
+    Use check_oasis_discussion(topic_id=...) to check progress and get the conclusion later.
 
     Two modes:
       - discussion=False (default): Execute mode. Agents run tasks sequentially/in parallel per workflow,
@@ -397,15 +398,13 @@ async def post_to_oasis(
         max_rounds: Maximum number of discussion rounds (1-20, default 5)
         schedule_file: Filename or path to a saved YAML workflow file. Short names (e.g. "review.yaml")
             are resolved under data/user_files/{user}/oasis/yaml/. Takes priority over schedule_yaml.
-        detach: If True (default), return immediately with topic_id. Use check_oasis_discussion later.
-            If False, block and wait for the final conclusion.
         notify_session: (auto-injected) Session ID for completion notification.
         discussion: If False (default), execute mode — agents just run tasks without discussion format.
             If True, forum discussion mode with JSON reply/vote.
             Can also be set in YAML via "discussion: true". When False (default), YAML setting is respected.
 
     Returns:
-        The final conclusion, or (if detach=True) the topic_id for later retrieval
+        The topic_id for later retrieval via check_oasis_discussion()
     """
     effective_user = username or _FALLBACK_USER
 
@@ -426,10 +425,11 @@ async def post_to_oasis(
                 body["discussion"] = True
             else:
                 body["discussion"] = False
-            if detach:
-                port = os.getenv("PORT_AGENT", "51200")
-                body["callback_url"] = f"http://127.0.0.1:{port}/system_trigger"
-                body["callback_session_id"] = notify_session or "default"
+
+            # Always detach mode — set callback for completion notification
+            port = os.getenv("PORT_AGENT", "51200")
+            body["callback_url"] = f"http://127.0.0.1:{port}/system_trigger"
+            body["callback_session_id"] = notify_session or "default"
 
             # schedule_file takes priority over schedule_yaml
             if schedule_file:
@@ -456,43 +456,12 @@ async def post_to_oasis(
 
             topic_id = resp.json()["topic_id"]
 
-            if detach:
-                return (
-                    f"🏛️ OASIS 任务已提交（脱离模式）\n"
-                    f"主题: {question[:80]}\n"
-                    f"Topic ID: {topic_id}\n\n"
-                    f"💡 使用 check_oasis_discussion(topic_id=\"{topic_id}\") 查看进展和结论。"
-                )
-
-            result = await client.get(
-                f"{OASIS_BASE_URL}/topics/{topic_id}/conclusion",
-                params={"timeout": 280, "user_id": effective_user},
+            return (
+                f"🏛️ OASIS 任务已提交\n"
+                f"主题: {question[:80]}\n"
+                f"Topic ID: {topic_id}\n\n"
+                f"💡 使用 check_oasis_discussion(topic_id=\"{topic_id}\") 查看进展和结论。"
             )
-
-            if result.status_code == 200:
-                data = result.json()
-                # Execution mode: server returns status="running" when still in progress
-                if data.get("status") == "running":
-                    return (
-                        f"🏛️ OASIS 执行任务仍在后台运行中\n"
-                        f"主题: {data['question']}\n"
-                        f"当前轮次: {data.get('current_round', '?')}\n"
-                        f"已产出帖子: {data.get('total_posts', 0)}\n"
-                        f"Topic ID: {topic_id}\n\n"
-                        f"💡 使用 check_oasis_discussion(topic_id=\"{topic_id}\") 查看进展和结果。"
-                    )
-                return (
-                    f"🏛️ OASIS 论坛讨论完成\n"
-                    f"主题: {data['question']}\n"
-                    f"讨论轮次: {data['rounds']}\n"
-                    f"总帖子数: {data['total_posts']}\n\n"
-                    f"📋 结论:\n{data['conclusion']}\n\n"
-                    f"💡 如需查看完整讨论过程，Topic ID: {topic_id}"
-                )
-            elif result.status_code == 504:
-                return f"⏰ 讨论超时未完成 (Topic ID: {topic_id})，可稍后通过 check_oasis_discussion 查看结果"
-            else:
-                return f"❌ 获取结论失败: {result.text}"
 
     except httpx.ConnectError:
         return _CONN_ERR

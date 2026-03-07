@@ -410,7 +410,7 @@ class SessionExpert:
         self.name = f"{name}#{session_id}"
         self.persona = persona
         self.is_oasis = "#oasis#" in session_id
-        self.timeout = timeout
+        self.timeout = timeout or 500.0
         self.tag = tag
         self._extra_headers = extra_headers or {}
 
@@ -713,7 +713,7 @@ class ExternalExpert:
         h.update(self._extra_headers)
         return h
 
-    async def _call_openclaw_cli(self, message: str) -> str:
+    async def _call_openclaw_cli(self, message: str, timeout: float | None = ...) -> str:
         """Call OpenClaw agent via CLI command.
 
         Runs: openclaw agent --agent <name> --message <msg>
@@ -728,6 +728,7 @@ class ExternalExpert:
         ]
         print(f"  [OASIS] 🦞 CLI call: openclaw agent --agent {self._oc_agent_name} "
               f"--message <{len(message)} chars>")
+        effective_timeout = self.timeout if timeout is ... else timeout
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -735,7 +736,7 @@ class ExternalExpert:
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=self.timeout
+                proc.communicate(), timeout=effective_timeout
             )
             stdout_text = stdout.decode("utf-8", errors="replace").strip()
             stderr_text = stderr.decode("utf-8", errors="replace").strip()
@@ -754,7 +755,7 @@ class ExternalExpert:
                 raise RuntimeError(f"Empty response from openclaw CLI. Raw: {stdout_text[:200]}")
             return reply
         except asyncio.TimeoutError:
-            raise RuntimeError(f"openclaw CLI timed out after {self.timeout}s")
+            raise RuntimeError(f"openclaw CLI timed out after {effective_timeout}s")
 
     @staticmethod
     def _parse_openclaw_output(raw: str) -> str:
@@ -805,7 +806,7 @@ class ExternalExpert:
             if not cli_message:
                 cli_message = messages[-1].get("content", "") if messages else ""
             try:
-                reply = await self._call_openclaw_cli(cli_message)
+                reply = await self._call_openclaw_cli(cli_message, timeout=effective_timeout)
                 print(f"  [OASIS] 🦞 CLI success for {self.name}")
                 return reply
             except Exception as cli_err:
