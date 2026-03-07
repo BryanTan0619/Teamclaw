@@ -3768,3 +3768,50 @@ async function toggleGroupMute() {
         }
     } catch (e) { console.error('Failed to toggle mute:', e); }
 }
+
+// ===== Orchestration Mobile Toggle Functions =====
+function orchToggleMobileSidebar() {
+    const sidebar = document.querySelector('.orch-sidebar');
+    const backdrop = document.getElementById('orch-mobile-backdrop');
+    const rightPanel = document.querySelector('.orch-right-panel');
+    if (rightPanel) rightPanel.classList.remove('mobile-open');
+    sidebar.classList.toggle('mobile-open');
+    backdrop.classList.toggle('active', sidebar.classList.contains('mobile-open'));
+}
+
+function orchToggleMobilePanel() {
+    const panel = document.querySelector('.orch-right-panel');
+    const backdrop = document.getElementById('orch-mobile-backdrop');
+    const sidebar = document.querySelector('.orch-sidebar');
+    if (sidebar) sidebar.classList.remove('mobile-open');
+    panel.classList.toggle('mobile-open');
+    backdrop.classList.toggle('active', panel.classList.contains('mobile-open'));
+}
+
+function orchCloseMobilePanels() {
+    const sidebar = document.querySelector('.orch-sidebar');
+    const panel = document.querySelector('.orch-right-panel');
+    const backdrop = document.getElementById('orch-mobile-backdrop');
+    if (sidebar) sidebar.classList.remove('mobile-open');
+    if (panel) panel.classList.remove('mobile-open');
+    if (backdrop) backdrop.classList.remove('active');
+}
+
+function toggleOrchExpertList() {
+    const grid = document.querySelector('.orch-sidebar-grid');
+    const icon = document.getElementById('orch-expert-toggle-icon');
+    if (!grid) return;
+    const collapsed = grid.style.display === 'none';
+    grid.style.display = collapsed ? '' : 'none';
+    if (icon) icon.style.transform = collapsed ? '' : 'rotate(-90deg)';
+}
+
+function toggleOrchFocusMode() {
+    const sidebar = document.querySelector('.orch-sidebar');
+    const panel = document.querySelector('.orch-right-panel');
+    const btn = document.getElementById('orch-focus-btn');
+    const isFocused = sidebar.classList.contains('focus-hidden');
+    sidebar.classList.toggle('focus-hidden', !isFocused);
+    panel.classList.toggle('focus-hidden', !isFocused);
+    if (btn) btn.classList.toggle('focus-active', !isFocused);
+}

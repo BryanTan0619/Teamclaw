@@ -648,20 +648,28 @@ header {
         background: rgba(0,0,0,0.3);
     }
     .orch-mobile-backdrop.active { display: block; }
-    /* toggle 按钮 */
+    /* toggle 按钮 - 带文字标签 */
     .orch-mobile-toggle {
         display: flex !important;
         position: absolute; z-index: 110;
-        width: 32px; height: 32px; border-radius: 8px;
+        height: 32px; border-radius: 8px;
+        padding: 0 10px; gap: 4px;
         align-items: center; justify-content: center;
         background: rgba(255,255,255,0.92); border: 1px solid #e5e7eb;
         box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-        font-size: 16px; cursor: pointer; color: #4b5563;
+        font-size: 13px; cursor: pointer; color: #4b5563;
         -webkit-tap-highlight-color: transparent;
+        white-space: nowrap;
     }
+    .orch-toggle-label { font-size: 11px; font-weight: 600; color: #374151; display: inline !important; }
     .orch-mobile-toggle:active { background: #e5e7eb; }
     .orch-mobile-toggle.left { top: 8px; left: 8px; }
     .orch-mobile-toggle.right { top: 8px; right: 8px; }
+    /* 移动端专家列表改为单列，分类小组 */
+    .orch-sidebar-grid {
+        grid-template-columns: 1fr !important;
+        gap: 6px !important;
+    }
     /* 工具栏更紧凑 */
     .orch-toolbar { padding: 4px 6px; gap: 2px; }
     .orch-btn { padding: 3px 6px; font-size: 10px; }
@@ -679,6 +687,7 @@ header {
 }
 /* 桌面端隐藏 toggle 按钮 */
 .orch-mobile-toggle { display: none; }
+.orch-toggle-label { display: none; }
 
 .main-layout { display: flex; height: var(--app-height, 100vh); max-width: 100%; overflow: hidden; }
 .chat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; height: var(--app-height, 100vh); overflow: hidden; }

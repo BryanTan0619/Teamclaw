@@ -683,7 +683,7 @@ function orchSetupCanvas() {
             // 端口触摸 → 连线
             if (target.classList.contains('orch-port') && target.dataset.dir === 'out') {
                 e.preventDefault();
-                const nodeId = parseInt(target.dataset.node);
+                const nodeId = target.dataset.node;
                 const portRect = target.getBoundingClientRect();
                 const cp = orchClientToCanvas(portRect.left + 5, portRect.top + 5);
                 orch.connecting = { sourceId: nodeId, sx: cp.x, sy: cp.y };
@@ -695,7 +695,7 @@ function orchSetupCanvas() {
             const nodeEl = target.closest('.orch-node');
             if (nodeEl && !target.classList.contains('orch-node-del')) {
                 e.preventDefault();
-                const nodeId = parseInt(nodeEl.id.replace('onode-', ''));
+                const nodeId = nodeEl.id.replace('onode-', '');
                 const node = orch.nodes.find(n => n.id === nodeId);
                 if (!node) return;
                 if (!orch.selectedNodes.has(nodeId)) orchClearSelection();
@@ -774,7 +774,7 @@ function orchSetupCanvas() {
             const lastTouch = e.changedTouches[0];
             const target = document.elementFromPoint(lastTouch.clientX, lastTouch.clientY);
             if (target && target.classList.contains('orch-port') && target.dataset.dir === 'in') {
-                const targetNodeId = parseInt(target.dataset.node);
+                const targetNodeId = target.dataset.node;
                 if (targetNodeId !== orch.connecting.sourceId) {
                     orchAddEdge(orch.connecting.sourceId, targetNodeId);
                 }
@@ -915,7 +915,7 @@ function orchSaveExternal(nodeId) {
         const el = document.getElementById('onode-' + nodeId);
         if (el) el.remove();
         orchRenderNode(node);
-        orchRedrawEdges();
+        orchRenderEdges();
     }
     document.getElementById('orch-external-modal')?.remove();
     orchUpdateYaml();
