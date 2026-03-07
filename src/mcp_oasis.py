@@ -433,6 +433,9 @@ async def post_to_oasis(
 
             # schedule_file takes priority over schedule_yaml
             if schedule_file:
+                # Auto-append .yaml if no extension
+                if not schedule_file.endswith((".yaml", ".yml")):
+                    schedule_file += ".yaml"
                 if not os.path.isabs(schedule_file):
                     yaml_dir = os.path.join(
                         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),

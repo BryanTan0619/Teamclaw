@@ -648,8 +648,13 @@ class ExternalExpert:
     # Oasis reply protocol: require agent to prefix reply with this tag
     _OASIS_REPLY_TAG = "[oasis reply]"
     _OASIS_REPLY_INSTRUCTION = (
-        "\n\n⚠️ IMPORTANT: You MUST start your reply with exactly \"[oasis reply]\" "
-        "(including brackets). Replies without this prefix will be ignored."
+        "\n\n⚠️ IMPORTANT — [oasis reply] protocol:\n"
+        "1. You MUST start your final reply with exactly \"[oasis reply]\" (including brackets).\n"
+        "2. Only use \"[oasis reply]\" when you have reached a CONCLUSION for this round.\n"
+        "3. The content after \"[oasis reply]\" is your FINAL statement/answer to present — "
+        "NOT your reasoning process, NOT intermediate thoughts.\n"
+        "4. Replies without the \"[oasis reply]\" prefix will be rejected.\n"
+        "Example: [oasis reply] 我认为方案A更优，因为……"
     )
     _OASIS_REPLY_MAX_RETRIES = 3
 
