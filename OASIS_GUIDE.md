@@ -47,14 +47,14 @@ Directly calls any OpenAI-compatible API. External service assumed stateful. Sen
 ```yaml
 - expert: "analyst#ext#ds1"
   api_url: "https://api.deepseek.com"
-  api_key: "****"                    # Masked — real key auto-read from OPENCLAW_API_KEY env var
+  api_key: "****"                    # Masked — real key auto-read from OPENCLAW_GATEWAY_TOKEN env var
   model: "deepseek-chat"
   headers:
     X-Custom-Header: "value"
   instruction: "Analyze from data perspective"
 ```
 
-> 🔒 **API Key Security**: Set `api_key: "****"` (or omit it) and the system auto-reads the real key from the `OPENCLAW_API_KEY` environment variable at runtime. Plaintext keys still work (backward compatible).
+> 🔒 **API Key Security**: Set `api_key: "****"` (or omit it) and the system auto-reads the real key from the `OPENCLAW_GATEWAY_TOKEN` environment variable at runtime. Plaintext keys still work (backward compatible).
 
 ### Special Suffix: `#new`
 
@@ -245,7 +245,7 @@ This achieves **maximum parallelism** — no unnecessary waiting, no explicit to
 | `expert` | Yes | Name (format determines type) |
 | `instruction` | No | Per-step instruction |
 | `api_url` | Yes (ext) | Base URL (auto-completes to `/v1/chat/completions`) |
-| `api_key` | No | Use `****` mask — auto-read from `OPENCLAW_API_KEY` env var. Plaintext also supported. |
+| `api_key` | No | Use `****` mask — auto-read from `OPENCLAW_GATEWAY_TOKEN` env var. Plaintext also supported. |
 | `model` | No | Default `gpt-3.5-turbo` |
 | `headers` | No | Extra HTTP headers (dict) |
 
@@ -259,14 +259,14 @@ This achieves **maximum parallelism** — no unnecessary waiting, no explicit to
 bash selfskill/scripts/run.sh configure --batch \
   OPENCLAW_SESSIONS_FILE=/path/to/agents/main/sessions/sessions.json \
   OPENCLAW_API_URL=http://127.0.0.1:18789/v1/chat/completions \
-  OPENCLAW_API_KEY=your-key
+  OPENCLAW_GATEWAY_TOKEN=your-key
 ```
 
 | Variable | Description |
 |----------|-------------|
 | `OPENCLAW_SESSIONS_FILE` | Path to OpenClaw `sessions.json`. Required for visual Canvas. |
 | `OPENCLAW_API_URL` | Full path with `/v1/chat/completions`. Must match gateway port. |
-| `OPENCLAW_API_KEY` | API key (if auth enabled). |
+| `OPENCLAW_GATEWAY_TOKEN gateway token (if auth enabled). |
 
 > LLM API and OpenClaw API are completely separate credentials!
 
@@ -292,7 +292,7 @@ Non-existent sessions are auto-created.
 ```yaml
 - expert: "coder#ext#oc1"
   api_url: "http://127.0.0.1:18789"
-  api_key: "****"                                  # Masked — real key from OPENCLAW_API_KEY env var
+  api_key: "****"                                  # Masked — real key from OPENCLAW_GATEWAY_TOKEN env var
   model: "agent:main:my-session"
   headers:
     x-openclaw-session-key: "agent:main:my-session"

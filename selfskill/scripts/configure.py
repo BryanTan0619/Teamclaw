@@ -36,7 +36,7 @@ VALID_KEYS = {
     # TTS配置
     "TTS_MODEL", "TTS_VOICE",
     # OpenClaw配置
-    "OPENCLAW_API_URL", "OPENCLAW_API_KEY", "OPENCLAW_SESSIONS_FILE",
+    "OPENCLAW_API_URL", "OPENCLAW_GATEWAY_TOKEN", "OPENCLAW_SESSIONS_FILE",
     # 内部配置
     "INTERNAL_TOKEN", "OPENAI_STANDARD_MODE",
     # 命令执行配置
@@ -209,7 +209,7 @@ AI_MODEL_TG=gemini-2.0-flash
 # OPENCLAW_API_URL: 默认通过 openclaw config get gateway.port 自动探测
 # 如需手动指定，取消注释并填写完整地址（含 /v1/chat/completions）
 # OPENCLAW_API_URL=http://127.0.0.1:23001/v1/chat/completions
-# OPENCLAW_API_KEY=your-openclaw-key-if-needed
+# OPENCLAW_GATEWAY_TOKEN=your-openclaw-token-if-needed
 """
 
 

@@ -715,7 +715,7 @@ async def list_openclaw_sessions(filter: str = Query("")):
 
     # Mask the API key: if set in env, return "****" so the frontend
     # knows a key exists but never sees the plaintext.
-    raw_key = os.getenv("OPENCLAW_API_KEY", "")
+    raw_key = os.getenv("OPENCLAW_GATEWAY_TOKEN", "")
     masked_key = "****" if raw_key else ""
 
     return {

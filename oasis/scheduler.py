@@ -30,7 +30,7 @@ Schedule YAML format:
     # 外部 agent（直连 OpenAI 兼容 API，不经过本地 agent）
     - expert: "分析师#ext#analyst"
       api_url: "https://api.deepseek.com"    # 必填：外部服务 base URL
-      api_key: "****"                      # 掩码 — 运行时从 OPENCLAW_API_KEY 环境变量自动读取
+      api_key: "****"                      # 掩码 — 运行时从 OPENCLAW_GATEWAY_TOKEN 环境变量自动读取
       model: "deepseek-chat"                 # 可选：模型名，默认 gpt-3.5-turbo
       headers:                               # 可选：额外 HTTP headers
         X-Custom-Auth: "token123"
@@ -151,7 +151,7 @@ def _extract_external_config(item: dict) -> dict:
         X-Custom-Header: "value"
 
     If api_key is the mask placeholder "****", it will be resolved to
-    the OPENCLAW_API_KEY environment variable at parse time.
+    the OPENCLAW_GATEWAY_TOKEN environment variable at parse time.
     """
     cfg: dict = {}
     if "api_url" in item:
@@ -160,7 +160,7 @@ def _extract_external_config(item: dict) -> dict:
         raw_key = str(item["api_key"])
         if raw_key == _API_KEY_MASK:
             # Resolve masked key from environment variable
-            cfg["api_key"] = os.getenv("OPENCLAW_API_KEY", "")
+            cfg["api_key"] = os.getenv("OPENCLAW_GATEWAY_TOKEN", "")
         else:
             cfg["api_key"] = raw_key
     if "model" in item:
