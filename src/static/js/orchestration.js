@@ -259,6 +259,131 @@ function orchShowAddExpertModal() {
     });
 }
 
+// ── Add OpenClaw Agent modal ──
+function orchShowAddOpenClawModal() {
+    const overlay = document.createElement('div');
+    overlay.className = 'orch-modal-overlay';
+    overlay.id = 'orch-add-openclaw-overlay';
+    overlay.innerHTML = `
+        <div class="orch-modal" style="min-width:340px;max-width:460px;">
+            <h3>🦞 ${t('orch_add_openclaw_title')}</h3>
+            <div style="display:flex;flex-direction:column;gap:10px;margin:12px 0;">
+                <label style="font-size:11px;font-weight:600;color:#374151;">
+                    ${t('orch_openclaw_agent_name')}
+                    <input id="orch-oc-name" type="text" placeholder="e.g. work, research, coding"
+                           style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;"
+                           pattern="[a-zA-Z0-9_-]+" title="Only alphanumeric, dash, underscore">
+                </label>
+                <label style="font-size:11px;font-weight:600;color:#374151;">
+                    Workspace ${t('orch_openclaw_ws_path')}
+                    <div style="display:flex;gap:4px;align-items:center;margin-top:2px;">
+                        <input id="orch-oc-workspace" type="text" placeholder="${t('orch_openclaw_ws_loading')}"
+                               style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:11px;font-family:monospace;color:#374151;">
+                        <button id="orch-oc-ws-reset" type="button" title="${t('orch_openclaw_ws_reset')}"
+                                style="padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;background:#f9fafb;cursor:pointer;font-size:11px;white-space:nowrap;">↺</button>
+                    </div>
+                </label>
+                <div style="font-size:10px;color:#6b7280;background:#f9fafb;border-radius:6px;padding:8px;">
+                    ${t('orch_openclaw_workspace_hint')}
+                </div>
+            </div>
+            <div class="orch-modal-btns">
+                <button id="orch-oc-cancel" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;font-size:12px;">${t('orch_modal_cancel')}</button>
+                <button id="orch-oc-create" style="padding:6px 14px;border-radius:6px;border:none;background:#10b981;color:white;cursor:pointer;font-size:12px;">🦞 ${t('orch_openclaw_create_btn')}</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#orch-oc-cancel').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    const nameInp = document.getElementById('orch-oc-name');
+    const wsInp = document.getElementById('orch-oc-workspace');
+    let parentDir = '';       // default workspace parent dir from server
+    let wsManualEdit = false; // whether user has manually edited workspace
+
+    // Fetch default workspace parent dir
+    fetch('/proxy_openclaw_default_workspace').then(r => r.json()).then(res => {
+        if (res.ok && res.parent_dir) {
+            parentDir = res.parent_dir;
+            // If name already typed, populate workspace
+            const n = nameInp.value.trim();
+            if (n && !wsManualEdit) {
+                wsInp.value = parentDir + '/workspace-' + n;
+            }
+            wsInp.placeholder = parentDir + '/workspace-...';
+        } else {
+            wsInp.placeholder = t('orch_openclaw_ws_fallback');
+        }
+    }).catch(() => { wsInp.placeholder = t('orch_openclaw_ws_fallback'); });
+
+    // Name changes → auto-update workspace (unless user has manually edited it)
+    nameInp.addEventListener('input', () => {
+        nameInp.style.borderColor = '#d1d5db';
+        nameInp.style.background = '';
+        if (!wsManualEdit && parentDir) {
+            const n = nameInp.value.trim();
+            wsInp.value = n ? (parentDir + '/workspace-' + n) : '';
+        }
+    });
+
+    // Track manual workspace edits
+    wsInp.addEventListener('input', () => { wsManualEdit = true; });
+
+    // Reset button: revert workspace to auto-derived value
+    overlay.querySelector('#orch-oc-ws-reset').addEventListener('click', () => {
+        wsManualEdit = false;
+        const n = nameInp.value.trim();
+        wsInp.value = (parentDir && n) ? (parentDir + '/workspace-' + n) : '';
+        wsInp.style.borderColor = '#d1d5db';
+    });
+
+    setTimeout(() => nameInp.focus(), 100);
+
+    overlay.querySelector('#orch-oc-create').addEventListener('click', async () => {
+        const name = nameInp.value.trim();
+        const workspace = wsInp.value.trim();
+        if (!name) { orchToast(t('orch_openclaw_name_required')); return; }
+        if (!/^[a-zA-Z0-9_-]+$/.test(name)) { orchToast(t('orch_openclaw_name_invalid')); return; }
+        if (!workspace) { orchToast(t('orch_openclaw_ws_required')); return; }
+        const btn = overlay.querySelector('#orch-oc-create');
+        btn.disabled = true;
+        btn.textContent = '⏳ ' + t('orch_openclaw_creating');
+        try {
+            const r = await fetch('/proxy_openclaw_add', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ name, workspace }),
+            });
+            const res = await r.json();
+            if (r.ok && res.ok) {
+                orchToast('🦞 ' + t('orch_openclaw_created', {name}));
+                overlay.remove();
+                orchLoadOpenClawSessions();
+            } else {
+                if (r.status === 409) {
+                    orchToast('⚠️ ' + t('orch_openclaw_exists', {name}));
+                    nameInp.style.borderColor = '#ef4444';
+                    nameInp.style.background = '#fef2f2';
+                    nameInp.focus();
+                    nameInp.select();
+                } else {
+                    orchToast('❌ ' + (res.error || t('orch_toast_net_error')));
+                }
+                btn.disabled = false;
+                btn.textContent = '🦞 ' + t('orch_openclaw_create_btn');
+            }
+        } catch(e) {
+            orchToast(t('orch_toast_net_error'));
+            btn.disabled = false;
+            btn.textContent = '🦞 ' + t('orch_openclaw_create_btn');
+        }
+    });
+    nameInp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') overlay.querySelector('#orch-oc-create').click();
+    });
+}
+
 function orchRenderSidebar() {
     orchRenderExpertSidebar();
     // Manual card (re-bind with unified events)

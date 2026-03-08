@@ -19,8 +19,8 @@ import uuid
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 import httpx
 import uvicorn
@@ -820,6 +820,95 @@ async def list_openclaw_agents(filter: str = Query("")):
         "available": True,
         "openclaw_api_url": base_url,
     }
+
+
+def _get_openclaw_default_workspace() -> str | None:
+    """Get the default agent's workspace path via ``openclaw config get agents.defaults.workspace``."""
+    if not _OPENCLAW_BIN:
+        return None
+    try:
+        result = subprocess.run(
+            [_OPENCLAW_BIN, "config", "get", "agents.defaults.workspace"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            return None
+        ws = result.stdout.strip()
+        # Expand ~ in case it's returned as-is
+        return os.path.expanduser(ws) if ws else None
+    except Exception:
+        return None
+
+
+@app.get("/sessions/openclaw/default-workspace")
+async def get_openclaw_default_workspace():
+    """Return the default workspace parent directory so the frontend can show a sensible default."""
+    if not _OPENCLAW_BIN:
+        return JSONResponse({"ok": False, "error": "openclaw CLI not available"}, status_code=500)
+    default_ws = _get_openclaw_default_workspace()
+    if not default_ws:
+        return {"ok": True, "parent_dir": "", "default_workspace": ""}
+    parent_dir = os.path.dirname(default_ws.rstrip("/"))
+    return {"ok": True, "parent_dir": parent_dir, "default_workspace": default_ws}
+
+
+@app.post("/sessions/openclaw/add")
+async def add_openclaw_agent(req: Request):
+    """Create a new OpenClaw agent via ``openclaw agents add <name> --workspace <path> --non-interactive``.
+
+    Accepts optional ``workspace`` from the client; falls back to
+    ``dirname(default_workspace)/workspace-{name}`` if not provided.
+    """
+    if not _OPENCLAW_BIN:
+        return JSONResponse({"ok": False, "error": "openclaw CLI not available"}, status_code=500)
+
+    body = await req.json()
+    name = (body.get("name") or "").strip()
+    if not name:
+        return JSONResponse({"ok": False, "error": "Agent name is required"}, status_code=400)
+
+    # Validate name: alphanumeric, dash, underscore only
+    import re as _re
+    if not _re.match(r'^[a-zA-Z0-9_-]+$', name):
+        return JSONResponse({"ok": False, "error": "Agent name must be alphanumeric (a-z, 0-9, -, _)"}, status_code=400)
+
+    # Workspace: use client-supplied value, or derive from default
+    custom_ws = (body.get("workspace") or "").strip()
+    if custom_ws:
+        new_workspace = os.path.expanduser(custom_ws)
+    else:
+        default_ws = _get_openclaw_default_workspace()
+        if not default_ws:
+            return JSONResponse({"ok": False, "error": "Cannot detect default agent workspace. Is openclaw configured?"}, status_code=500)
+        parent_dir = os.path.dirname(default_ws.rstrip("/"))
+        new_workspace = os.path.join(parent_dir, f"workspace-{name}")
+
+    # Check if agent already exists
+    existing = _fetch_openclaw_agents_via_cli() or []
+    if any(a.get("name") == name for a in existing):
+        return JSONResponse({"ok": False, "error": f"Agent '{name}' already exists"}, status_code=409)
+
+    # Execute: openclaw agents add <name> --workspace <path> --non-interactive
+    try:
+        result = subprocess.run(
+            [_OPENCLAW_BIN, "agents", "add", name, "--workspace", new_workspace, "--non-interactive"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode != 0:
+            err_msg = (result.stderr or result.stdout or "Unknown error").strip()[:500]
+            print(f"  [OASIS] ⚠️ openclaw agents add failed (rc={result.returncode}): {err_msg}")
+            return JSONResponse({"ok": False, "error": err_msg}, status_code=500)
+
+        return {
+            "ok": True,
+            "name": name,
+            "workspace": new_workspace,
+            "message": f"Agent '{name}' created successfully",
+        }
+    except subprocess.TimeoutExpired:
+        return JSONResponse({"ok": False, "error": "Command timed out"}, status_code=504)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 # --- System Info ---

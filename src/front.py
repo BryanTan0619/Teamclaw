@@ -417,6 +417,30 @@ def proxy_openclaw_sessions():
         return jsonify({"error": str(e), "sessions": [], "available": False}), 500
 
 
+@app.route("/proxy_openclaw_add", methods=["POST"])
+def proxy_openclaw_add():
+    """Proxy to create a new OpenClaw agent via OASIS server."""
+    try:
+        r = requests.post(
+            f"{OASIS_BASE_URL}/sessions/openclaw/add",
+            json=request.get_json(force=True),
+            timeout=35,
+        )
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/proxy_openclaw_default_workspace", methods=["GET"])
+def proxy_openclaw_default_workspace():
+    """Proxy to get the default OpenClaw workspace parent directory."""
+    try:
+        r = requests.get(f"{OASIS_BASE_URL}/sessions/openclaw/default-workspace", timeout=10)
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/proxy_session_history", methods=["POST"])
 def proxy_session_history():
     """代理获取指定会话的历史消息"""

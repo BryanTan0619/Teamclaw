@@ -318,7 +318,10 @@
                         <div class="orch-sidebar-grid-cell">
                             <div class="orch-sidebar-grid-cell-header">
 <span data-i18n="orch_openclaw_sessions">🦞 OpenClaw</span>
-                                <button onclick="orchLoadOpenClawSessions()" data-i18n-title="refresh" title="刷新">🔄</button>
+                                <span style="display:flex;gap:2px;">
+                                    <button onclick="orchShowAddOpenClawModal()" data-i18n-title="orch_add_openclaw_title" title="新建Agent" style="color:#10b981;">➕</button>
+                                    <button onclick="orchLoadOpenClawSessions()" data-i18n-title="refresh" title="刷新">🔄</button>
+                                </span>
                             </div>
                             <div class="orch-expert-list" id="orch-expert-list-openclaw"></div>
                         </div>
