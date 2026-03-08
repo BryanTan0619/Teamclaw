@@ -110,6 +110,11 @@
                         <span class="hidden sm:inline" data-i18n="history">🤖Agents</span>
                         <span class="sm:hidden text-base leading-none">🤖</span>
                     </button>
+                    <!-- OpenClaw Quick Config Button -->
+                    <button onclick="orchOpenClawQuickConfig()" class="desktop-only-btn text-[10px] sm:text-xs bg-orange-50 text-orange-600 hover:bg-orange-100 px-2 py-1 rounded border border-orange-300 transition-colors flex items-center justify-center font-semibold" data-i18n-title="orch_oc_quick_title" title="Setting OpenClaw Agent">
+                        <span class="hidden sm:inline" data-i18n="orch_oc_quick_btn">🦞 Setting OpenClaw Agent</span>
+                        <span class="sm:hidden text-base leading-none">🦞</span>
+                    </button>
                     <!-- New Session Button: Visible on all devices -->
                     <button onclick="handleNewSession()" class="text-[10px] sm:text-xs bg-green-50 text-green-600 hover:bg-green-100 px-2 py-1 rounded border border-green-200 transition-colors mr-1 flex items-center justify-center" data-i18n-title="new_session_confirm" title="开启新对话">
                         <span class="sm:hidden text-base font-bold leading-none">+</span>
@@ -130,6 +135,7 @@
                         <button onclick="toggleMobileMenu()" class="mobile-menu-btn text-[10px] bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded border border-gray-300 transition-colors" data-i18n-title="more_actions" title="更多操作">⋮</button>
                         <div id="mobile-menu-dropdown" class="mobile-menu-dropdown" style="display:none;">
                             <button onclick="toggleSessionSidebar(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_history">🤖 Agents</button>
+                            <button onclick="orchOpenClawQuickConfig(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_openclaw_cfg">🦞 OpenClaw</button>
                             <button onclick="handleNewSession(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_new">➕ 新对话</button>
                             <button onclick="toggleOasisMobile(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_oasis">🏛️ TeamsWork</button>
                             <button onclick="openSettings(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_settings">⚙️ 设置</button>

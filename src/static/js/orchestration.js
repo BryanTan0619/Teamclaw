@@ -415,6 +415,81 @@ async function orchWsOpenFile(agentName, workspace, filename, overlay) {
     }
 }
 
+// ── OpenClaw Quick Config (entry from chat header) ──
+async function orchOpenClawQuickConfig() {
+    const overlay = document.createElement('div');
+    overlay.className = 'orch-modal-overlay';
+    overlay.id = 'orch-oc-quick-cfg-overlay';
+    overlay.innerHTML = `
+        <div class="orch-modal" style="min-width:320px;max-width:460px;width:85vw;max-height:70vh;display:flex;flex-direction:column;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                <h3 style="margin:0;font-size:14px;">🦞 ${t('orch_oc_quick_title')}</h3>
+                <button id="orch-qcfg-close" style="background:none;border:none;font-size:18px;cursor:pointer;padding:2px 6px;color:#6b7280;">✕</button>
+            </div>
+            <div id="orch-qcfg-status" style="font-size:10px;color:#9ca3af;margin-bottom:8px;">⏳ ${t('loading')}</div>
+            <div id="orch-qcfg-list" style="flex:1;overflow-y:auto;min-height:0;display:flex;flex-direction:column;gap:6px;"></div>
+            <div style="padding-top:8px;border-top:1px solid #e5e7eb;margin-top:8px;">
+                <button id="orch-qcfg-add" style="width:100%;padding:8px 12px;border:2px dashed #d1d5db;border-radius:8px;background:#fafafa;cursor:pointer;font-size:12px;color:#2563eb;font-weight:600;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:6px;" onmouseenter="this.style.borderColor='#93c5fd';this.style.background='#eff6ff'" onmouseleave="this.style.borderColor='#d1d5db';this.style.background='#fafafa'">
+                    ➕ ${t('orch_oc_quick_add')}
+                </button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#orch-qcfg-close').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    overlay.querySelector('#orch-qcfg-add').addEventListener('click', () => {
+        overlay.remove();
+        orchShowAddOpenClawModal();
+    });
+
+    const statusEl = overlay.querySelector('#orch-qcfg-status');
+    const listEl = overlay.querySelector('#orch-qcfg-list');
+
+    try {
+        const resp = await fetch('/proxy_openclaw_sessions');
+        const data = await resp.json();
+        if (!data.available) {
+            statusEl.textContent = '🚫 ' + t('orch_oc_quick_no_agents');
+            statusEl.style.color = '#ef4444';
+            return;
+        }
+        if (!data.agents || data.agents.length === 0) {
+            statusEl.textContent = t('orch_oc_quick_empty');
+            statusEl.style.color = '#9ca3af';
+            return;
+        }
+        statusEl.textContent = t('orch_oc_quick_select');
+        statusEl.style.color = '#6b7280';
+
+        for (const a of data.agents) {
+            const name = a.name || 'unknown';
+            const profile = (a.tools && a.tools.profile) ? a.tools.profile : '-';
+            const skillCount = a.skills_all ? '∞' : (a.skills ? a.skills.length : 0);
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;transition:all .15s;background:#fff;';
+            row.addEventListener('mouseenter', () => { row.style.background = '#eff6ff'; row.style.borderColor = '#93c5fd'; });
+            row.addEventListener('mouseleave', () => { row.style.background = '#fff'; row.style.borderColor = '#e5e7eb'; });
+            row.innerHTML = `
+                <span style="font-size:20px;">🦞</span>
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:12px;font-weight:600;color:#1f2937;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(name)}${a.is_default ? ' <span style="color:#f59e0b;">⭐</span>' : ''}</div>
+                    <div style="font-size:10px;color:#6b7280;">🔧${escapeHtml(profile)} · 🧩${skillCount}</div>
+                </div>
+                <span style="font-size:14px;color:#9ca3af;">→</span>
+            `;
+            row.addEventListener('click', () => {
+                overlay.remove();
+                orchShowAgentConfigModal(name);
+            });
+            listEl.appendChild(row);
+        }
+    } catch(e) {
+        statusEl.textContent = '❌ ' + t('orch_toast_net_error');
+        statusEl.style.color = '#ef4444';
+    }
+}
+
 // ── OpenClaw Agent Config Modal (Skills + Tools) ──
 async function orchShowAgentConfigModal(agentName) {
     const overlay = document.createElement('div');
