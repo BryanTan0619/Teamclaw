@@ -250,6 +250,7 @@ class DiscussionEngine:
             yaml_to_expert[full_name] = expert
 
         self.experts = experts_list
+        self._dag_step_map: dict[str, ScheduleStep] = {}  # populated in _run_dag()
 
         # Build lookup map: YAML original names first (highest priority for scheduling),
         # then register by internal name, title, tag, session_id as shortcuts
@@ -393,6 +394,9 @@ class DiscussionEngine:
             if s.step_id:
                 step_map[s.step_id] = s
 
+        # Store for _build_visibility_filter to use
+        self._dag_step_map = step_map
+
         # Event per step_id — set when that step completes
         done_events: dict[str, asyncio.Event] = {}
         for sid in step_map:
@@ -440,9 +444,43 @@ class DiscussionEngine:
             self._check_cancelled()
             await self._execute_step(step)
 
+    def _build_visibility_filter(self, step: ScheduleStep) -> dict:
+        """Build visibility filter kwargs for execute mode.
+
+        In execute mode (non-discussion):
+          - DAG mode: agent can only see posts from direct upstream (depends_on) steps.
+          - Non-DAG mode: agent can only see posts from the previous round.
+        In discussion mode: no filtering (returns empty dict).
+        """
+        if self._discussion:
+            return {}
+
+        if self.schedule.is_dag:
+            # DAG mode: only see posts from direct upstream authors
+            if not step.depends_on:
+                # No dependencies → cannot see any prior posts
+                return {"visible_authors": set()}
+            # Resolve depends_on step_ids → expert names (authors)
+            upstream_authors: set[str] = set()
+            for dep_id in step.depends_on:
+                dep_step = self._dag_step_map.get(dep_id)
+                if dep_step:
+                    dep_agents = self._resolve_experts(dep_step.expert_names)
+                    for a in dep_agents:
+                        upstream_authors.add(a.name)
+            return {"visible_authors": upstream_authors}
+        else:
+            # Non-DAG mode: only see posts from the previous round
+            prev_round = self.forum.current_round - 1
+            if prev_round < 1:
+                # First round → no prior posts visible
+                return {"visible_authors": set()}
+            return {"from_round": prev_round}
+
     async def _execute_step(self, step: ScheduleStep):
         """Execute a single schedule step."""
         disc = self._discussion
+        vis = self._build_visibility_filter(step)
 
         if step.step_type == StepType.MANUAL:
             print(f"  [OASIS] 📝 Manual post by {step.manual_author}")
@@ -460,7 +498,7 @@ class DiscussionEngine:
 
             async def _tracked_participate(expert):
                 try:
-                    await expert.participate(self.forum, discussion=disc)
+                    await expert.participate(self.forum, discussion=disc, **vis)
                 finally:
                     self.forum.log_event("agent_done", agent=expert.name)
 
@@ -475,7 +513,7 @@ class DiscussionEngine:
                 instr = step.instructions.get(step.expert_names[0], "")
                 print(f"  [OASIS] 🎤 {agents[0].name} speaks" + (f" (instruction: {instr[:40]}...)" if instr else ""))
                 self.forum.log_event("agent_call", agent=agents[0].name)
-                await agents[0].participate(self.forum, instruction=instr, discussion=disc)
+                await agents[0].participate(self.forum, instruction=instr, discussion=disc, **vis)
                 self.forum.log_event("agent_done", agent=agents[0].name)
 
         elif step.step_type == StepType.PARALLEL:
@@ -489,7 +527,7 @@ class DiscussionEngine:
                 async def _run_with_instr(agent, yaml_name):
                     instr = step.instructions.get(yaml_name, "")
                     try:
-                        await agent.participate(self.forum, instruction=instr, discussion=disc)
+                        await agent.participate(self.forum, instruction=instr, discussion=disc, **vis)
                     finally:
                         self.forum.log_event("agent_done", agent=agent.name)
 

@@ -325,8 +325,20 @@ class ExpertAgent:
         self.tag = tag
         self.llm = _get_llm(temperature)
 
-    async def participate(self, forum: DiscussionForum, instruction: str = "", discussion: bool = True):
-        others = await forum.browse(viewer=self.name, exclude_self=True)
+    async def participate(
+        self,
+        forum: DiscussionForum,
+        instruction: str = "",
+        discussion: bool = True,
+        visible_authors: set[str] | None = None,
+        from_round: int | None = None,
+    ):
+        others = await forum.browse(
+            viewer=self.name,
+            exclude_self=True,
+            visible_authors=visible_authors if not discussion else None,
+            from_round=from_round if not discussion else None,
+        )
 
         if not discussion:
             # ── Execute mode: just run the task, no discussion format ──
@@ -429,14 +441,28 @@ class SessionExpert:
         h.update(self._extra_headers)
         return h
 
-    async def participate(self, forum: DiscussionForum, instruction: str = "", discussion: bool = True):
+    async def participate(
+        self,
+        forum: DiscussionForum,
+        instruction: str = "",
+        discussion: bool = True,
+        visible_authors: set[str] | None = None,
+        from_round: int | None = None,
+    ):
         """
         Participate in one round.
 
         discussion=True: forum discussion mode (JSON reply/vote)
         discussion=False: execute mode — agent just runs the task, output logged to forum
+        visible_authors: (execute mode only) if set, only see posts from these authors (DAG upstream)
+        from_round: (execute mode only) if set, only see posts from this round onward (non-DAG prev round)
         """
-        others = await forum.browse(viewer=self.name, exclude_self=True)
+        others = await forum.browse(
+            viewer=self.name,
+            exclude_self=True,
+            visible_authors=visible_authors if not discussion else None,
+            from_round=from_round if not discussion else None,
+        )
 
         if not discussion:
             # ── Execute mode: send task directly, no JSON format requirement ──
@@ -925,8 +951,20 @@ class ExternalExpert:
               f"[oasis reply end], publishing collected content")
         return "\n\n".join(seg for seg in buf if seg)
 
-    async def participate(self, forum: DiscussionForum, instruction: str = "", discussion: bool = True):
-        others = await forum.browse(viewer=self.name, exclude_self=True)
+    async def participate(
+        self,
+        forum: DiscussionForum,
+        instruction: str = "",
+        discussion: bool = True,
+        visible_authors: set[str] | None = None,
+        from_round: int | None = None,
+    ):
+        others = await forum.browse(
+            viewer=self.name,
+            exclude_self=True,
+            visible_authors=visible_authors if not discussion else None,
+            from_round=from_round if not discussion else None,
+        )
 
         if not discussion:
             # ── Execute mode ──
