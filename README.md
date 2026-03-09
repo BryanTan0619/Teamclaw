@@ -57,7 +57,7 @@ plan:
 | **How they discuss** | `schedule_yaml` | 4 step types freely combined (sequential / parallel / all / manual injection) |
 | **How deep** | `max_rounds` + `use_bot_session` | Control round depth; choose stateful (memory + tools) or stateless (lightweight & fast) |
 
-#### Four Schedule Step Types
+#### Four Schedule Step Types + DAG Mode
 
 | Step Type | Format | Effect |
 |-----------|--------|--------|
@@ -67,6 +67,23 @@ plan:
 | `manual` | `- manual: {author: "Host", content: "..."}` | Inject fixed content (bypasses LLM) |
 
 Set `repeat: true` to loop the plan each round; `repeat: false` executes plan steps once then ends.
+
+**DAG Mode (Dependency-Driven Parallelism):**
+
+When the workflow has fan-in or fan-out, use `id` and `depends_on` fields on each step. The engine automatically runs independent steps in parallel and waits for all dependencies before starting a node:
+
+```yaml
+version: 1
+repeat: false
+plan:
+  - id: research
+    expert: "creative#temp#1"              # Starts immediately (no depends_on)
+  - id: analysis
+    expert: "critical#temp#1"              # Runs in parallel with research
+  - id: synthesis
+    expert: "synthesis#temp#1"
+    depends_on: [research, analysis]       # Waits for both to complete
+```
 
 #### Expert Pool
 
@@ -392,6 +409,7 @@ Auto-downloads `cloudflared`, starts tunnels for Web UI + Bark push, captures pu
 - **Request Verification**: Every `/ask` re-verifies password
 - **Internal Auth**: Inter-service communication via `INTERNAL_TOKEN` (auto-generated 64-char hex)
 - **User Isolation**: Conversation memory, file storage, custom experts all isolated by `user_id`
+- **OASIS API Key Masking**: External API keys (e.g. `OPENCLAW_GATEWAY_TOKEN`) are never exposed in YAML or the frontend canvas. Set `api_key: "****"` in YAML and the system auto-reads the real key from environment variables at runtime.
 
 ---
 
@@ -517,7 +535,7 @@ plan:
 | **怎么讨论** | `schedule_yaml` | 4 种步骤类型自由组合（顺序 / 并行 / 全员 / 手动注入） |
 | **多深入** | `max_rounds` + `use_bot_session` | 控制轮次深度，可选有状态（记忆+工具）或无状态（轻量快速） |
 
-#### 四种调度步骤
+#### 四种调度步骤 + DAG 模式
 
 | 步骤类型 | 格式 | 效果 |
 |----------|------|------|
@@ -527,6 +545,23 @@ plan:
 | `manual` | `- manual: {author: "主持人", content: "..."}` | 注入固定内容（不经过 LLM） |
 
 设置 `repeat: true` 时，调度计划每轮循环执行；`repeat: false` 则按步骤顺序执行一次后结束。
+
+**DAG 模式（依赖驱动的并行执行）：**
+
+当工作流存在 fan-in（多个前驱汇聚到一个节点）或 fan-out（一个节点分发到多个后继）时，给每个步骤加上 `id` 和 `depends_on` 字段。引擎自动并行执行无依赖关系的步骤，并等待所有前驱完成后再启动下游节点：
+
+```yaml
+version: 1
+repeat: false
+plan:
+  - id: research
+    expert: "creative#temp#1"              # 立即启动（无 depends_on）
+  - id: analysis
+    expert: "critical#temp#1"              # 与 research 并行执行
+  - id: synthesis
+    expert: "synthesis#temp#1"
+    depends_on: [research, analysis]       # 等待两者都完成
+```
 
 #### 专家池
 
@@ -860,9 +895,9 @@ python scripts/tunnel.py
 - **请求验证**：每次 `/ask` 都重新验证密码
 - **内部鉴权**：服务间通信通过 `INTERNAL_TOKEN`（自动生成 64 字符 hex）
 - **用户隔离**：对话记忆、文件存储、自定义专家均按 `user_id` 隔离
+- **OASIS API Key 掩码机制**：外部 API 密钥（如 `OPENCLAW_GATEWAY_TOKEN`）不会在 YAML 或前端画布中暴露明文。YAML 中设置 `api_key: "****"` 即可，系统运行时自动从环境变量读取真实密钥。
 
-### 外部 curl 参与 OASIS 服务器（完整方法）
-
+### 外部 curl 参与 OASIS 服务器
 OASIS 服务器（端口 51202）除了供 MCP 工具调用外，也支持直接 curl 操作，便于外部脚本或调试。所有接口均使用 `user_id` 参数进行用户隔离。
 
 #### 1. 专家管理

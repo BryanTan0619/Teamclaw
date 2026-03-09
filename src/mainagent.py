@@ -397,122 +397,19 @@ async def login(req: LoginRequest):
     raise HTTPException(status_code=401, detail="用户名或密码错误")
 
 
-@app.post("/ask", deprecated=True)
-async def ask_agent(req: UserRequest):
-    """[已弃用] 请使用 POST /v1/chat/completions (非流式, stream=false)"""
-    if not verify_password(req.user_id, req.password):
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
-
-    # Compose thread_id: user_id#session_id for conversation isolation
-    thread_id = f"{req.user_id}#{req.session_id}"
-    config = {"configurable": {"thread_id": thread_id}}
-    user_input = {
-        "messages": [_build_human_message(req.text, req.images, req.files, req.audios)],
-        "trigger_source": "user",
-        "enabled_tools": req.enabled_tools,
-        "user_id": req.user_id,
-        "session_id": req.session_id,
-    }
-
-    result = await agent.agent_app.ainvoke(user_input, config)
-    return {"status": "success", "response": _extract_text(result["messages"][-1].content)}
-
-
-@app.post("/ask_stream", deprecated=True)
-async def ask_agent_stream(req: UserRequest):
-    """[已弃用] 请使用 POST /v1/chat/completions (流式, stream=true)"""
-    if not verify_password(req.user_id, req.password):
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
-
-    # Cancel previous active task for this user+session
-    task_key = f"{req.user_id}#{req.session_id}"
-    await agent.cancel_task(task_key)
-
-    # Compose thread_id: user_id#session_id for conversation isolation
-    thread_id = f"{req.user_id}#{req.session_id}"
-    config = {"configurable": {"thread_id": thread_id}}
-    user_input = {
-        "messages": [_build_human_message(req.text, req.images, req.files, req.audios)],
-        "trigger_source": "user",
-        "enabled_tools": req.enabled_tools,
-        "user_id": req.user_id,
-        "session_id": req.session_id,
-    }
-
-    queue: asyncio.Queue[str | None] = asyncio.Queue()
-
-    async def _stream_worker(task_key=task_key):
-        """在独立 Task 中运行 astream_events，产出数据写入 queue"""
-        collected_tokens = []
-        try:
-            async for event in agent.agent_app.astream_events(user_input, config, version="v2"):
-                kind = event.get("event", "")
-                if kind == "on_chat_model_stream":
-                    chunk = event.get("data", {}).get("chunk")
-                    if chunk and hasattr(chunk, "content") and chunk.content:
-                        text = _extract_text(chunk.content)
-                        if text:
-                            collected_tokens.append(text)
-                            text = text.replace("\\", "\\\\").replace("\n", "\\n")
-                            await queue.put(f"data: {text}\n\n")
-                elif kind == "on_tool_start":
-                    tool_name = event.get("name", "")
-                    await queue.put(f"data: \\n🔧 调用工具: {tool_name}...\\n\n\n")
-                elif kind == "on_tool_end":
-                    await queue.put(f"data: \\n✅ 工具执行完成\\n\n\n")
-            await queue.put("data: [DONE]\n\n")
-        except asyncio.CancelledError:
-            # 终止时，修复 checkpoint 中可能不完整的消息序列
-            try:
-                snapshot = await agent.agent_app.aget_state(config)
-                last_msgs = snapshot.values.get("messages", [])
-                if last_msgs:
-                    last_msg = last_msgs[-1]
-                    if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
-                        tool_messages = [
-                            ToolMessage(
-                                content="⚠️ 工具调用被用户终止",
-                                tool_call_id=tc["id"],
-                            )
-                            for tc in last_msg.tool_calls
-                        ]
-                        await agent.agent_app.aupdate_state(config, {"messages": tool_messages})
-            except Exception:
-                pass
-
-            partial_text = "".join(collected_tokens)
-            if partial_text:
-                partial_text += "\n\n⚠️ （回复被用户终止）"
-                partial_msg = AIMessage(content=partial_text)
-                await agent.agent_app.aupdate_state(config, {"messages": [partial_msg]})
-            await queue.put(f"data: \\n\\n⚠️ 已终止思考\n\n")
-            await queue.put("data: [DONE]\n\n")
-        except Exception as e:
-            await queue.put(f"data: \\n❌ 流式响应异常: {str(e)}\n\n")
-            await queue.put("data: [DONE]\n\n")
-        finally:
-            await queue.put(None)
-            agent.unregister_task(task_key)
-
-    task = asyncio.create_task(_stream_worker())
-    agent.register_task(task_key, task)
-
-    async def event_generator():
-        while True:
-            item = await queue.get()
-            if item is None:
-                break
-            yield item
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+# ──────────────────────────────────────────────────────────────
+# [已弃用] /ask 和 /ask_stream — 已被 /v1/chat/completions 替代
+# 前端和内部调用均已迁移，以下端点注释保留备查。
+# ──────────────────────────────────────────────────────────────
+# @app.post("/ask", deprecated=True)
+# async def ask_agent(req: UserRequest):
+#     """[已弃用] 请使用 POST /v1/chat/completions (非流式, stream=false)"""
+#     ...
+#
+# @app.post("/ask_stream", deprecated=True)
+# async def ask_agent_stream(req: UserRequest):
+#     """[已弃用] 请使用 POST /v1/chat/completions (流式, stream=true)"""
+#     ...
 
 
 @app.post("/cancel")
@@ -817,6 +714,201 @@ async def session_status(req: SessionStatusRequest):
     }
 
 
+# --- Settings API (读写 .env 系统配置) ---
+
+# 允许前端读写的配置项白名单（敏感项如 INTERNAL_TOKEN 不暴露）
+_SETTINGS_WHITELIST = [
+    "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "LLM_PROVIDER", "LLM_VISION_SUPPORT",
+    "TTS_MODEL", "TTS_VOICE",
+    "PORT_AGENT", "PORT_SCHEDULER", "PORT_OASIS", "PORT_FRONTEND",
+    "TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS",
+    "QQ_APP_ID", "QQ_BOT_SECRET", "QQ_BOT_USERNAME",
+    "PUBLIC_DOMAIN",
+    "OPENAI_STANDARD_MODE",
+    "ALLOWED_COMMANDS", "EXEC_TIMEOUT", "MAX_OUTPUT_LENGTH",
+]
+
+# 需要掩码显示的敏感字段
+_MASK_FIELDS = {"LLM_API_KEY", "TELEGRAM_BOT_TOKEN", "QQ_BOT_SECRET"}
+
+# 重启信号文件：由 /restart API 写入，launcher.py 监控到后自动重启所有服务
+_RESTART_FLAG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".restart_flag")
+
+
+def _read_env_settings() -> dict:
+    """从 .env 文件解析出白名单内的键值对。"""
+    settings = {}
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key = key.strip()
+                if key in _SETTINGS_WHITELIST:
+                    settings[key] = val.strip()
+    except FileNotFoundError:
+        pass
+    return settings
+
+
+def _read_env_all() -> dict:
+    """从 .env 文件解析出所有非注释键值对（前端完全掌控用）。"""
+    settings = {}
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key = key.strip()
+                if key:
+                    settings[key] = val.strip()
+    except FileNotFoundError:
+        pass
+    return settings
+
+
+def _mask_value(key: str, val: str) -> str:
+    """对敏感字段做掩码。"""
+    if key in _MASK_FIELDS and val and len(val) > 8:
+        return val[:4] + "****" + val[-4:]
+    return val
+
+
+def _write_env_settings(updates: dict):
+    """将 updates 合并写入 .env（更新已有行或追加新行）。"""
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        lines = []
+
+    updated_keys = set()
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.partition("=")[0].strip()
+            if key in updates:
+                new_lines.append(f"{key}={updates[key]}\n")
+                updated_keys.add(key)
+                continue
+        new_lines.append(line)
+
+    # 追加新增的键
+    for key, val in updates.items():
+        if key not in updated_keys:
+            new_lines.append(f"{key}={val}\n")
+
+    with open(env_path, "w", encoding="utf-8") as f:
+        f.writelines(new_lines)
+
+
+class SettingsUpdateRequest(BaseModel):
+    user_id: str
+    password: str
+    settings: dict
+
+
+@app.get("/settings")
+async def get_settings(user_id: str, password: str):
+    """获取系统配置（敏感值掩码）。"""
+    if not verify_password(user_id, password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    raw = _read_env_settings()
+    masked = {k: _mask_value(k, v) for k, v in raw.items()}
+    return {"status": "success", "settings": masked}
+
+
+@app.post("/settings")
+async def update_settings(req: SettingsUpdateRequest):
+    """更新系统配置。支持热生效的配置项会立即同步到 os.environ。"""
+    if not verify_password(req.user_id, req.password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    # 只允许白名单内的 key
+    filtered = {}
+    for k, v in req.settings.items():
+        if k in _SETTINGS_WHITELIST:
+            # 如果值是掩码（含 ****），跳过不更新
+            if "****" in str(v):
+                continue
+            filtered[k] = str(v)
+
+    if filtered:
+        _write_env_settings(filtered)
+        return {
+            "status": "success",
+            "updated": list(filtered.keys()),
+        }
+
+    return {"status": "success", "updated": []}
+
+
+# --- Full Settings API (前端用户完全掌控 .env，不受白名单限制) ---
+
+# 所有包含 KEY / TOKEN / SECRET / PASSWORD 的字段做掩码
+_FULL_MASK_PATTERNS = ("KEY", "TOKEN", "SECRET", "PASSWORD")
+
+
+@app.get("/settings/full")
+async def get_settings_full(user_id: str, password: str):
+    """获取 .env 中所有配置项（敏感值掩码），供前端用户完全掌控。"""
+    if not verify_password(user_id, password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    raw = _read_env_all()
+    masked = {}
+    for k, v in raw.items():
+        if any(p in k.upper() for p in _FULL_MASK_PATTERNS) and v and len(v) > 8:
+            masked[k] = v[:4] + "****" + v[-4:]
+        else:
+            masked[k] = v
+    return {"status": "success", "settings": masked}
+
+
+@app.post("/settings/full")
+async def update_settings_full(req: SettingsUpdateRequest):
+    """更新 .env 任意配置项（前端用户完全掌控），不受白名单限制。"""
+    if not verify_password(req.user_id, req.password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    updates = {}
+    for k, v in req.settings.items():
+        # 跳过掩码值
+        if "****" in str(v):
+            continue
+        updates[k] = str(v)
+
+    if updates:
+        _write_env_settings(updates)
+        return {
+            "status": "success",
+            "updated": list(updates.keys()),
+        }
+
+    return {"status": "success", "updated": []}
+
+
+@app.post("/restart")
+async def restart_services(req: SettingsUpdateRequest):
+    """写入重启信号文件，launcher.py 检测到后会自动重启所有服务。"""
+    if not verify_password(req.user_id, req.password):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    try:
+        with open(_RESTART_FLAG, "w") as f:
+            f.write("restart")
+        return {"status": "success", "message": "重启信号已发送，服务将在数秒内重启"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"写入重启信号失败: {e}")
+
+
 @app.post("/system_trigger")
 async def system_trigger(req: SystemTriggerRequest, x_internal_token: str | None = Header(None)):
     verify_internal_token(x_internal_token)
@@ -838,7 +930,12 @@ async def system_trigger(req: SystemTriggerRequest, x_internal_token: str | None
             agent.set_thread_busy_source(thread_id, "system")
             print(f"[SystemTrigger] 🔒 Acquired lock on {thread_id}, invoking graph ...")
             try:
-                await agent.agent_app.ainvoke(system_input, config)
+                # 用 astream_events 替代 ainvoke，这样每个 event 都是一个
+                # await 点，task.cancel() 可以在任意 event 间隙注入
+                async for event in agent.agent_app.astream_events(
+                    system_input, config, version="v2"
+                ):
+                    pass  # 不需要处理事件，只是消费完整个流
                 agent.add_pending_system_message(thread_id)
                 print(f"[SystemTrigger] ✅ Done for {thread_id}")
             except asyncio.CancelledError:
@@ -1189,12 +1286,43 @@ async def openai_chat_completions(
 
     # --- 非流式 ---
     if not req.stream:
-        async with thread_lock:
-            agent.set_thread_busy_source(thread_id, "user")
+        task_key = f"{user_id}#{session_id}"
+        await agent.cancel_task(task_key)
+
+        async def _non_stream_worker():
+            async with thread_lock:
+                agent.set_thread_busy_source(thread_id, "user")
+                try:
+                    return await agent.agent_app.ainvoke(user_input, config)
+                finally:
+                    agent.clear_thread_busy_source(thread_id)
+
+        task = asyncio.create_task(_non_stream_worker())
+        agent.register_task(task_key, task)
+        try:
+            result = await task
+        except asyncio.CancelledError:
+            # 被 cancel_task 终止：修复 checkpoint 中可能不完整的 tool_calls
             try:
-                result = await agent.agent_app.ainvoke(user_input, config)
-            finally:
-                agent.clear_thread_busy_source(thread_id)
+                snapshot = await agent.agent_app.aget_state(config)
+                last_msgs = snapshot.values.get("messages", [])
+                if last_msgs:
+                    last_msg_item = last_msgs[-1]
+                    if hasattr(last_msg_item, "tool_calls") and last_msg_item.tool_calls:
+                        tool_messages = [
+                            ToolMessage(
+                                content="⚠️ 工具调用被用户终止",
+                                tool_call_id=tc["id"],
+                            )
+                            for tc in last_msg_item.tool_calls
+                        ]
+                        await agent.agent_app.aupdate_state(config, {"messages": tool_messages})
+            except Exception:
+                pass
+            return _make_openai_response("⚠️ 已终止", model=model_name)
+        finally:
+            agent.unregister_task(task_key)
+
         last_msg = result["messages"][-1]
 
         # 检测是否有外部工具调用需要返回

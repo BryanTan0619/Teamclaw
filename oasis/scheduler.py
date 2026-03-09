@@ -30,11 +30,19 @@ Schedule YAML format:
     # 外部 agent（直连 OpenAI 兼容 API，不经过本地 agent）
     - expert: "分析师#ext#analyst"
       api_url: "https://api.deepseek.com"    # 必填：外部服务 base URL
-      api_key: "sk-xxx"                      # 必填：外部服务 API key
+      api_key: "****"                      # 掩码 — 运行时从 OPENCLAW_GATEWAY_TOKEN 环境变量自动读取
       model: "deepseek-chat"                 # 可选：模型名，默认 gpt-3.5-turbo
       headers:                               # 可选：额外 HTTP headers
         X-Custom-Auth: "token123"
       instruction: "从数据角度分析"           # 可选
+
+    # OpenClaw agent（model 匹配 agent:<name> 时优先使用 CLI 调用）
+    # CLI: openclaw agent --agent "main" --message "..."
+    # 当 CLI 不可用时自动回退到 HTTP API
+    - expert: "coder#ext#oc1"
+      api_url: "http://127.0.0.1:18789"
+      api_key: "****"
+      model: "agent:main"                      # agent:<agent_name> 触发 CLI 优先
 
     # 多个专家同时并行发言
     - parallel:
@@ -44,7 +52,7 @@ Schedule YAML format:
         # 外部 agent 也可以在 parallel 中使用
         - expert: "GPT4专家#ext#gpt4"
           api_url: "https://api.openai.com"
-          api_key: "sk-xxx"
+          api_key: "****"
           model: "gpt-4"
 
     # 手动注入一条帖子（不经过 LLM）
@@ -55,6 +63,28 @@ Schedule YAML format:
 
     # 所有专家并行（等同于不用 schedule 的默认行为）
     - all_experts: true
+
+  # ── DAG 模式（单向无环图调度）──
+  # 当 plan 中的步骤包含 id 和 depends_on 字段时，自动进入 DAG 模式。
+  # 每个步骤的所有前驱步骤完成后，该步骤立即开始执行（最大化并行）。
+  #
+  # 示例:
+  #   version: 1
+  #   repeat: false
+  #   plan:
+  #     - id: step_a
+  #       expert: "creative#temp#1"
+  #     - id: step_b
+  #       expert: "critical#temp#1"
+  #     - id: step_c
+  #       expert: "writer#temp#1"
+  #       depends_on: [step_a, step_b]     # step_c 等待 step_a 和 step_b 都完成
+  #     - id: step_d
+  #       expert: "reviewer#temp#1"
+  #       depends_on: [step_c]
+  #
+  # depends_on 为空列表或省略 → 该步骤没有前驱，立即执行。
+  # DAG 必须是无环的，否则会抛出 ValueError。
 
 Execution modes:
   repeat: true  -> plan 在每轮重复执行，max_rounds 控制总轮数
@@ -69,7 +99,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
+import os
+
 import yaml
+
+# Placeholder mask used in YAML to indicate "use key from environment"
+_API_KEY_MASK = "****"
 
 
 class StepType(str, Enum):
@@ -91,6 +126,9 @@ class ScheduleStep:
     manual_reply_to: Optional[int] = None                    # for MANUAL
     # External agent config: expert_name → {api_url, api_key, model}
     external_configs: dict[str, dict] = field(default_factory=dict)
+    # DAG fields
+    step_id: str = ""                                        # unique id for DAG dependency
+    depends_on: list[str] = field(default_factory=list)      # list of step_ids this step waits for
 
 
 @dataclass
@@ -99,6 +137,7 @@ class Schedule:
     steps: list[ScheduleStep]
     repeat: bool = False  # True = repeat plan each round; False = run once
     discussion: bool = False  # True = forum discussion mode (JSON reply/vote); False = execute mode (agents just run tasks)
+    is_dag: bool = False  # True when steps have id/depends_on fields (DAG execution mode)
 
 
 def _extract_external_config(item: dict) -> dict:
@@ -106,16 +145,24 @@ def _extract_external_config(item: dict) -> dict:
 
     Supports:
       api_url: "https://api.example.com"      # external API base URL
-      api_key: "sk-xxx"                        # API key
+      api_key: "sk-xxx" or "****"              # API key (masked = read from env)
       model: "gpt-4"                           # model name
       headers:                                 # extra HTTP headers (key: value)
         X-Custom-Header: "value"
+
+    If api_key is the mask placeholder "****", it will be resolved to
+    the OPENCLAW_GATEWAY_TOKEN environment variable at parse time.
     """
     cfg: dict = {}
     if "api_url" in item:
         cfg["api_url"] = str(item["api_url"])
     if "api_key" in item:
-        cfg["api_key"] = str(item["api_key"])
+        raw_key = str(item["api_key"])
+        if raw_key == _API_KEY_MASK:
+            # Resolve masked key from environment variable
+            cfg["api_key"] = os.getenv("OPENCLAW_GATEWAY_TOKEN", "")
+        else:
+            cfg["api_key"] = raw_key
     if "model" in item:
         cfg["model"] = str(item["model"])
     if "headers" in item and isinstance(item["headers"], dict):
@@ -141,9 +188,23 @@ def parse_schedule(yaml_content: str) -> Schedule:
     discussion = bool(data.get("discussion", False))
 
     steps: list[ScheduleStep] = []
+    has_ids = False  # track whether any step has an 'id' field → DAG mode
+
     for i, item in enumerate(plan):
         if not isinstance(item, dict):
             raise ValueError(f"Step {i}: must be a dict, got {type(item).__name__}")
+
+        # Extract DAG fields (common to all step types)
+        step_id = str(item.get("id", ""))
+        depends_on_raw = item.get("depends_on", [])
+        if isinstance(depends_on_raw, str):
+            depends_on = [depends_on_raw]
+        elif isinstance(depends_on_raw, list):
+            depends_on = [str(d) for d in depends_on_raw]
+        else:
+            depends_on = []
+        if step_id:
+            has_ids = True
 
         if "expert" in item:
             expert_name = str(item["expert"])
@@ -151,13 +212,15 @@ def parse_schedule(yaml_content: str) -> Schedule:
             ext_configs = {}
             if "instruction" in item:
                 instr_map[expert_name] = str(item["instruction"])
-            if "api_url" in item or "headers" in item:
+            if "api_url" in item or "headers" in item or "model" in item:
                 ext_configs[expert_name] = _extract_external_config(item)
             steps.append(ScheduleStep(
                 step_type=StepType.EXPERT,
                 expert_names=[expert_name],
                 instructions=instr_map,
                 external_configs=ext_configs,
+                step_id=step_id,
+                depends_on=depends_on,
             ))
 
         elif "parallel" in item:
@@ -170,7 +233,7 @@ def parse_schedule(yaml_content: str) -> Schedule:
                     names.append(ename)
                     if "instruction" in sub:
                         instr_map[ename] = str(sub["instruction"])
-                    if "api_url" in sub or "headers" in sub:
+                    if "api_url" in sub or "headers" in sub or "model" in sub:
                         ext_configs[ename] = _extract_external_config(sub)
                 elif isinstance(sub, str):
                     names.append(sub)
@@ -183,10 +246,16 @@ def parse_schedule(yaml_content: str) -> Schedule:
                 expert_names=names,
                 instructions=instr_map,
                 external_configs=ext_configs,
+                step_id=step_id,
+                depends_on=depends_on,
             ))
 
         elif "all_experts" in item:
-            steps.append(ScheduleStep(step_type=StepType.ALL))
+            steps.append(ScheduleStep(
+                step_type=StepType.ALL,
+                step_id=step_id,
+                depends_on=depends_on,
+            ))
 
         elif "manual" in item:
             m = item["manual"]
@@ -197,12 +266,55 @@ def parse_schedule(yaml_content: str) -> Schedule:
                 manual_author=str(m.get("author", "主持人")),
                 manual_content=str(m["content"]),
                 manual_reply_to=m.get("reply_to"),
+                step_id=step_id,
+                depends_on=depends_on,
             ))
 
         else:
             raise ValueError(f"Step {i}: unknown step type, keys={list(item.keys())}")
 
-    return Schedule(steps=steps, repeat=repeat, discussion=discussion)
+    # Detect DAG mode: if any step has an 'id', it's a DAG schedule
+    is_dag = has_ids
+
+    # Validate DAG: check for cycles and invalid references
+    if is_dag:
+        _validate_dag(steps)
+
+    return Schedule(steps=steps, repeat=repeat, discussion=discussion, is_dag=is_dag)
+
+
+def _validate_dag(steps: list[ScheduleStep]) -> None:
+    """Validate DAG: check that all depends_on references exist and there are no cycles."""
+    id_set = {s.step_id for s in steps if s.step_id}
+
+    # Check all depends_on references are valid
+    for s in steps:
+        for dep in s.depends_on:
+            if dep not in id_set:
+                raise ValueError(f"Step '{s.step_id}': depends_on references unknown step '{dep}'")
+
+    # Check for cycles using Kahn's algorithm
+    in_deg: dict[str, int] = {s.step_id: 0 for s in steps if s.step_id}
+    adj: dict[str, list[str]] = {s.step_id: [] for s in steps if s.step_id}
+    for s in steps:
+        if not s.step_id:
+            continue
+        for dep in s.depends_on:
+            adj[dep].append(s.step_id)
+            in_deg[s.step_id] += 1
+
+    queue = [sid for sid, deg in in_deg.items() if deg == 0]
+    visited = 0
+    while queue:
+        node = queue.pop(0)
+        visited += 1
+        for neighbor in adj.get(node, []):
+            in_deg[neighbor] -= 1
+            if in_deg[neighbor] == 0:
+                queue.append(neighbor)
+
+    if visited < len(id_set):
+        raise ValueError("DAG schedule contains a cycle — workflow must be acyclic")
 
 
 def load_schedule_file(path: str) -> Schedule:

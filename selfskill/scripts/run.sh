@@ -5,6 +5,9 @@
 #   bash selfskill/scripts/run.sh start                          # 后台启动服务
 #   bash selfskill/scripts/run.sh stop                           # 停止服务
 #   bash selfskill/scripts/run.sh status                         # 检查服务状态
+#   bash selfskill/scripts/run.sh start-tunnel                   # 启动公网隧道（自动下载+暴露前端）
+#   bash selfskill/scripts/run.sh stop-tunnel                    # 停止公网隧道
+#   bash selfskill/scripts/run.sh tunnel-status                  # 查看隧道状态和公网地址
 #   bash selfskill/scripts/run.sh setup                          # 首次：安装环境依赖
 #   bash selfskill/scripts/run.sh add-user <name> <password>     # 创建/更新用户
 #   bash selfskill/scripts/run.sh configure <KEY> <VALUE>        # 设置 .env 配置项
@@ -36,12 +39,30 @@ case "${1:-help}" in
             exit 1
         fi
 
-        if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-            echo "⚠️  Mini TimeBot 已在运行 (PID: $(cat "$PIDFILE"))"
-            exit 0
+        # 先停止旧实例（复用 stop 逻辑）
+        if [ -f "$PIDFILE" ]; then
+            OLD_PID=$(cat "$PIDFILE")
+            if kill -0 "$OLD_PID" 2>/dev/null; then
+                echo "🧹 发现旧实例 (PID: $OLD_PID)，先停止..."
+                kill "$OLD_PID"
+                for i in $(seq 1 30); do
+                    if ! kill -0 "$OLD_PID" 2>/dev/null; then
+                        break
+                    fi
+                    sleep 0.5
+                done
+                if kill -0 "$OLD_PID" 2>/dev/null; then
+                    echo "⚠️  强制终止..."
+                    kill -9 "$OLD_PID" 2>/dev/null || true
+                    sleep 1
+                fi
+                echo "✅ 旧实例已停止"
+            fi
+            rm -f "$PIDFILE"
         fi
 
         echo "🚀 启动 Mini TimeBot (headless)..."
+        export MINI_TIMEBOT_HEADLESS=1
         mkdir -p "$PROJECT_ROOT/logs"
         nohup python scripts/launcher.py > "$PROJECT_ROOT/logs/launcher.log" 2>&1 &
         LAUNCHER_PID=$!
@@ -133,6 +154,86 @@ case "${1:-help}" in
         exit 0
         ;;
 
+    start-tunnel)
+        # 启动 Cloudflare Tunnel（自动下载 cloudflared + 暴露前端到公网）
+        TUNNEL_PIDFILE="$PROJECT_ROOT/.tunnel.pid"
+        if [ -f "$TUNNEL_PIDFILE" ] && kill -0 "$(cat "$TUNNEL_PIDFILE")" 2>/dev/null; then
+            echo "⚠️  Tunnel 已在运行 (PID: $(cat "$TUNNEL_PIDFILE"))"
+            # 读取当前 PUBLIC_DOMAIN
+            source config/.env 2>/dev/null || true
+            if [ -n "$PUBLIC_DOMAIN" ] && [ "$PUBLIC_DOMAIN" != "wait to set" ]; then
+                echo "🌍 公网地址: $PUBLIC_DOMAIN"
+            fi
+            exit 0
+        fi
+
+        echo "🌐 正在启动 Cloudflare Tunnel..."
+        mkdir -p "$PROJECT_ROOT/logs"
+        nohup python scripts/tunnel.py > "$PROJECT_ROOT/logs/tunnel.log" 2>&1 &
+        TUNNEL_PID=$!
+        echo "$TUNNEL_PID" > "$TUNNEL_PIDFILE"
+
+        # 等待公网地址就绪（最多 60 秒）
+        echo -n "   等待公网地址"
+        for i in $(seq 1 30); do
+            source config/.env 2>/dev/null || true
+            if [ -n "$PUBLIC_DOMAIN" ] && [ "$PUBLIC_DOMAIN" != "wait to set" ] && echo "$PUBLIC_DOMAIN" | grep -q "trycloudflare.com"; then
+                echo " ✅"
+                echo "🌍 公网地址: $PUBLIC_DOMAIN"
+                exit 0
+            fi
+            echo -n "."
+            sleep 2
+        done
+        echo ""
+        echo "⚠️  Tunnel 可能仍在启动中，请查看日志: $PROJECT_ROOT/logs/tunnel.log"
+        exit 0
+        ;;
+
+    stop-tunnel)
+        TUNNEL_PIDFILE="$PROJECT_ROOT/.tunnel.pid"
+        if [ -f "$TUNNEL_PIDFILE" ]; then
+            PID=$(cat "$TUNNEL_PIDFILE")
+            if kill -0 "$PID" 2>/dev/null; then
+                echo "正在停止 Tunnel (PID: $PID)..."
+                kill "$PID"
+                for i in $(seq 1 10); do
+                    if ! kill -0 "$PID" 2>/dev/null; then
+                        break
+                    fi
+                    sleep 0.5
+                done
+                if kill -0 "$PID" 2>/dev/null; then
+                    kill -9 "$PID" 2>/dev/null
+                fi
+                echo "✅ Tunnel 已停止"
+            else
+                echo "Tunnel 进程已不存在"
+            fi
+            rm -f "$TUNNEL_PIDFILE"
+        else
+            echo "Tunnel 未运行"
+        fi
+        exit 0
+        ;;
+
+    tunnel-status)
+        TUNNEL_PIDFILE="$PROJECT_ROOT/.tunnel.pid"
+        if [ -f "$TUNNEL_PIDFILE" ] && kill -0 "$(cat "$TUNNEL_PIDFILE")" 2>/dev/null; then
+            echo "✅ Tunnel 正在运行 (PID: $(cat "$TUNNEL_PIDFILE"))"
+            source config/.env 2>/dev/null || true
+            if [ -n "$PUBLIC_DOMAIN" ] && [ "$PUBLIC_DOMAIN" != "wait to set" ]; then
+                echo "🌍 公网地址: $PUBLIC_DOMAIN"
+            else
+                echo "⏳ 公网地址尚未就绪"
+            fi
+        else
+            echo "❌ Tunnel 未运行"
+            rm -f "$TUNNEL_PIDFILE" 2>/dev/null
+        fi
+        exit 0
+        ;;
+
     help|--help|-h)
         echo "Mini TimeBot Skill 入口"
         echo ""
@@ -142,6 +243,9 @@ case "${1:-help}" in
         echo "  start                          后台启动服务"
         echo "  stop                           停止服务"
         echo "  status                         检查服务状态"
+        echo "  start-tunnel                   启动公网隧道（自动下载 cloudflared）"
+        echo "  stop-tunnel                    停止公网隧道"
+        echo "  tunnel-status                  查看隧道状态和公网地址"
         echo "  setup                          安装环境依赖（首次）"
         echo "  add-user <name> <password>     创建/更新用户"
         echo "  configure <KEY> <VALUE>        设置 .env 配置项"

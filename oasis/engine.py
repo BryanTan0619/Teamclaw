@@ -12,6 +12,7 @@ Three expert backends:
   3. ExternalExpert — external OpenAI-compatible API (name="title#ext#id")
      - Directly calls external endpoints (DeepSeek, GPT-4, Ollama, etc)
      - Configured per-expert via YAML: api_url, api_key, model
+     - OpenClaw CLI priority: model "agent:<name>" uses CLI first, HTTP fallback
 
 Expert pool sourcing (YAML-only, schedule_file or schedule_yaml required):
   Pool is built entirely from YAML expert names (deduplicated).
@@ -152,9 +153,9 @@ class DiscussionEngine:
                       f"Use 'tag#temp#N' or 'tag#oasis#id' or 'name#ext#id' or 'title#session_id'.")
                 continue
 
-            # Handle #new suffix: strip it and generate a random session part
+            # Handle #new suffix: strip only "new", keep the '#' separator
             force_new = full_name.endswith("#new")
-            working_name = full_name[:-4] if force_new else full_name  # strip "#new"
+            working_name = full_name[:-3] if force_new else full_name  # strip "new" only
 
             first, sid = working_name.split("#", 1)
             expert: ExpertAgent | SessionExpert | ExternalExpert
@@ -165,24 +166,31 @@ class DiscussionEngine:
                     ext_id = uuid.uuid4().hex[:8]
                     print(f"  [OASIS] 🆕 #new: '{full_name}' → new external session '{ext_id}'")
                 cfg = ext_configs.get(full_name, {})
-                if not cfg.get("api_url"):
+                is_openclaw = first.lower() == "openclaw"
+                if not cfg.get("api_url") and not is_openclaw:
                     print(f"  [OASIS] ⚠️ External expert '{full_name}' missing 'api_url' in YAML, skipping.")
                     continue
+                # OpenClaw agents can work via CLI without api_url
+                api_url = cfg.get("api_url", "") or ""
+                model_str = cfg.get("model", "gpt-3.5-turbo")
                 config = self._lookup_by_tag(first, user_id)
                 expert_name = config["name"] if config else first
                 persona = config.get("persona", "") if config else ""
                 expert = ExternalExpert(
                     name=expert_name,
                     ext_id=ext_id,
-                    api_url=cfg["api_url"],
-                    api_key=cfg.get("api_key", ""),
-                    model=cfg.get("model", "gpt-3.5-turbo"),
+                    api_url=api_url,
+                    api_key=cfg.get("api_key", "") or os.getenv("OPENCLAW_GATEWAY_TOKEN", ""),
+                    model=model_str,
                     persona=persona,
                     timeout=bot_timeout,
                     tag=first,
                     extra_headers=cfg.get("headers"),
                 )
-                print(f"  [OASIS] 🌐 External expert: {expert.name} → {cfg['api_url']}")
+                if is_openclaw and not api_url:
+                    print(f"  [OASIS] 🦞 OpenClaw agent: {expert.name} (CLI only, no api_url)")
+                else:
+                    print(f"  [OASIS] 🌐 External expert: {expert.name} → {api_url}")
             elif sid.startswith("temp#"):
                 # e.g. "creative#temp#1" → ExpertAgent with explicit temp_id
                 config = self._lookup_by_tag(first, user_id)
@@ -242,6 +250,7 @@ class DiscussionEngine:
             yaml_to_expert[full_name] = expert
 
         self.experts = experts_list
+        self._dag_step_map: dict[str, ScheduleStep] = {}  # populated in _run_dag()
 
         # Build lookup map: YAML original names first (highest priority for scheduling),
         # then register by internal name, title, tag, session_id as shortcuts
@@ -335,7 +344,11 @@ class DiscussionEngine:
             self.forum.conclusion = f"讨论过程中出现错误: {str(e)}"
 
     async def _run_scheduled(self):
-        """Execute the schedule."""
+        """Execute the schedule (linear or DAG)."""
+        if self.schedule.is_dag:
+            await self._run_dag()
+            return
+
         steps = self.schedule.steps
         # In execute mode, early_stop is meaningless (no votes)
         can_early_stop = self._early_stop and self._discussion
@@ -368,9 +381,106 @@ class DiscussionEngine:
                     print(f"[OASIS] 🤝 Consensus reached at step {step_idx + 1}")
                     break
 
+    async def _run_dag(self):
+        """Execute DAG schedule: run steps as soon as all their dependencies complete.
+
+        Uses asyncio tasks + events so that independent branches run in parallel,
+        and a node starts immediately once all its predecessors finish.
+        """
+        steps = self.schedule.steps
+        # Build lookup: step_id → step
+        step_map: dict[str, ScheduleStep] = {}
+        for s in steps:
+            if s.step_id:
+                step_map[s.step_id] = s
+
+        # Store for _build_visibility_filter to use
+        self._dag_step_map = step_map
+
+        # Event per step_id — set when that step completes
+        done_events: dict[str, asyncio.Event] = {}
+        for sid in step_map:
+            done_events[sid] = asyncio.Event()
+
+        total = len(step_map)
+        completed_count = 0
+
+        async def _run_step(step: ScheduleStep):
+            nonlocal completed_count
+            # Wait for all dependencies
+            for dep_id in step.depends_on:
+                if dep_id in done_events:
+                    await done_events[dep_id].wait()
+
+            self._check_cancelled()
+
+            completed_count += 1
+            self.forum.current_round = completed_count
+            self.forum.max_rounds = total
+            self.forum.log_event("round", detail=f"DAG step '{step.step_id}' ({completed_count}/{total})")
+            print(f"[OASIS] 📢 DAG step '{step.step_id}' ({completed_count}/{total})")
+
+            await self._execute_step(step)
+
+            # Signal completion
+            if step.step_id in done_events:
+                done_events[step.step_id].set()
+
+        # Launch all steps concurrently — each waits for its own deps
+        tasks = [asyncio.create_task(_run_step(s)) for s in steps if s.step_id]
+
+        # Also run steps without IDs sequentially at the end (backward compat)
+        no_id_steps = [s for s in steps if not s.step_id]
+
+        # Wait for all DAG tasks
+        if tasks:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for r in results:
+                if isinstance(r, Exception) and not isinstance(r, asyncio.CancelledError):
+                    print(f"[OASIS] ❌ DAG step error: {r}")
+
+        # Run non-DAG steps (if any) sequentially after DAG
+        for step in no_id_steps:
+            self._check_cancelled()
+            await self._execute_step(step)
+
+    def _build_visibility_filter(self, step: ScheduleStep) -> dict:
+        """Build visibility filter kwargs for execute mode.
+
+        In execute mode (non-discussion):
+          - DAG mode: agent can only see posts from direct upstream (depends_on) steps.
+          - Non-DAG mode: agent can only see posts from the previous round.
+        In discussion mode: no filtering (returns empty dict).
+        """
+        if self._discussion:
+            return {}
+
+        if self.schedule.is_dag:
+            # DAG mode: only see posts from direct upstream authors
+            if not step.depends_on:
+                # No dependencies → cannot see any prior posts
+                return {"visible_authors": set()}
+            # Resolve depends_on step_ids → expert names (authors)
+            upstream_authors: set[str] = set()
+            for dep_id in step.depends_on:
+                dep_step = self._dag_step_map.get(dep_id)
+                if dep_step:
+                    dep_agents = self._resolve_experts(dep_step.expert_names)
+                    for a in dep_agents:
+                        upstream_authors.add(a.name)
+            return {"visible_authors": upstream_authors}
+        else:
+            # Non-DAG mode: only see posts from the previous round
+            prev_round = self.forum.current_round - 1
+            if prev_round < 1:
+                # First round → no prior posts visible
+                return {"visible_authors": set()}
+            return {"from_round": prev_round}
+
     async def _execute_step(self, step: ScheduleStep):
         """Execute a single schedule step."""
         disc = self._discussion
+        vis = self._build_visibility_filter(step)
 
         if step.step_type == StepType.MANUAL:
             print(f"  [OASIS] 📝 Manual post by {step.manual_author}")
@@ -388,7 +498,7 @@ class DiscussionEngine:
 
             async def _tracked_participate(expert):
                 try:
-                    await expert.participate(self.forum, discussion=disc)
+                    await expert.participate(self.forum, discussion=disc, **vis)
                 finally:
                     self.forum.log_event("agent_done", agent=expert.name)
 
@@ -403,7 +513,7 @@ class DiscussionEngine:
                 instr = step.instructions.get(step.expert_names[0], "")
                 print(f"  [OASIS] 🎤 {agents[0].name} speaks" + (f" (instruction: {instr[:40]}...)" if instr else ""))
                 self.forum.log_event("agent_call", agent=agents[0].name)
-                await agents[0].participate(self.forum, instruction=instr, discussion=disc)
+                await agents[0].participate(self.forum, instruction=instr, discussion=disc, **vis)
                 self.forum.log_event("agent_done", agent=agents[0].name)
 
         elif step.step_type == StepType.PARALLEL:
@@ -417,7 +527,7 @@ class DiscussionEngine:
                 async def _run_with_instr(agent, yaml_name):
                     instr = step.instructions.get(yaml_name, "")
                     try:
-                        await agent.participate(self.forum, instruction=instr, discussion=disc)
+                        await agent.participate(self.forum, instruction=instr, discussion=disc, **vis)
                     finally:
                         self.forum.log_event("agent_done", agent=agent.name)
 

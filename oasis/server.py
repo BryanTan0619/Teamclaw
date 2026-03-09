@@ -11,14 +11,16 @@ Start with:
 """
 
 import os
+import shutil
+import subprocess
 import sys
 import asyncio
 import uuid
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 import httpx
 import uvicorn
@@ -36,6 +38,27 @@ if _project_root not in sys.path:
 
 env_path = os.path.join(_project_root, "config", ".env")
 load_dotenv(dotenv_path=env_path)
+
+
+def _get_env(key: str, default: str = "") -> str:
+    """Read from os.environ first; fall back to .env file if missing.
+
+    configure.py's set_env() writes to .env but does NOT update
+    os.environ in *this* process, so a freshly-written value might
+    only exist on disk.  Re-read the file as a fallback.
+    """
+    val = os.getenv(key, "")
+    if val:
+        return val
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                s = line.strip()
+                if s and not s.startswith("#") and s.startswith(key + "="):
+                    return s.split("=", 1)[1].strip()
+    except FileNotFoundError:
+        pass
+    return default
 
 from oasis.models import (
     CreateTopicRequest,
@@ -413,6 +436,16 @@ async def get_conclusion(topic_id: str, user_id: str = Query(...), timeout: int 
     if forum.status == "error":
         raise HTTPException(500, f"Discussion failed: {forum.conclusion}")
     if forum.status != "concluded":
+        # Execution mode: return 202 (still running) instead of 504 error
+        if not forum.discussion:
+            return {
+                "topic_id": topic_id,
+                "question": forum.question,
+                "status": "running",
+                "current_round": forum.current_round,
+                "total_posts": len(forum.posts),
+                "message": "执行仍在后台运行中，可稍后通过 check_oasis_discussion 查看结果",
+            }
         raise HTTPException(504, "Discussion timed out")
 
     return {
@@ -430,20 +463,30 @@ async def get_conclusion(topic_id: str, user_id: str = Query(...), timeout: int 
 
 @app.get("/experts")
 async def list_experts(user_id: str = ""):
-    """List all available expert agents (public + user custom)."""
+    """List all available expert agents (public + agency + user custom)."""
     from oasis.experts import get_all_experts
     configs = get_all_experts(user_id or None)
-    return {
-        "experts": [
-            {
-                "name": c["name"],
-                "tag": c["tag"],
-                "persona": c["persona"],
-                "source": c.get("source", "public"),
-            }
-            for c in configs
-        ]
-    }
+    result = []
+    for c in configs:
+        persona_raw = c["persona"]
+        # Agency 专家的 persona 是完整 md 正文，过长时截断为预览
+        if len(persona_raw) > 300:
+            persona_preview = persona_raw[:300] + "..."
+        else:
+            persona_preview = persona_raw
+        entry = {
+            "name": c["name"],
+            "tag": c["tag"],
+            "persona": persona_preview,
+            "source": c.get("source", "public"),
+        }
+        # 为 agency 专家附加分类和描述
+        if c.get("category"):
+            entry["category"] = c["category"]
+        if c.get("description"):
+            entry["description"] = c["description"]
+        result.append(entry)
+    return {"experts": result}
 
 
 @app.get("/sessions/oasis")
@@ -646,69 +689,731 @@ async def delete_user_expert_route(tag: str, user_id: str = Query(...)):
 
 
 # ------------------------------------------------------------------
-# OpenClaw session discovery
+# OpenClaw agent discovery
 # ------------------------------------------------------------------
 
-_OPENCLAW_SESSIONS_FILE = os.getenv(
-    "OPENCLAW_SESSIONS_FILE",
-    "",
-)
+_OPENCLAW_BIN = shutil.which("openclaw")
+
+
+def _fetch_openclaw_agents_via_cli() -> list[dict] | None:
+    """Call ``openclaw agents list --json`` and return parsed agent list.
+
+    Returns None if the CLI is unavailable or the command fails.
+    """
+    if not _OPENCLAW_BIN:
+        return None
+    try:
+        result = subprocess.run(
+            [_OPENCLAW_BIN, "agents", "list", "--json"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            # --json may not be supported; fall back to text parsing
+            result_text = subprocess.run(
+                [_OPENCLAW_BIN, "agents", "list"],
+                capture_output=True, text=True, timeout=15,
+            )
+            if result_text.returncode != 0:
+                print(f"  [OASIS] ⚠️ openclaw agents list failed (rc={result_text.returncode}): "
+                      f"{result_text.stderr.strip()[:200]}")
+                return None
+            return _parse_agents_text(result_text.stdout)
+        data = json.loads(result.stdout)
+        # Expect {"agents": [...]} or a plain list
+        agents_raw: list[dict] = []
+        if isinstance(data, dict):
+            agents_raw = data.get("agents", [])
+        elif isinstance(data, list):
+            agents_raw = data
+        else:
+            return None
+        # Normalise: JSON uses "id" and "isDefault" (camelCase)
+        for a in agents_raw:
+            a["name"] = a.get("id", "")
+            a["is_default"] = a.get("isDefault", False)
+        return agents_raw
+    except subprocess.TimeoutExpired:
+        print("  [OASIS] ⚠️ openclaw agents list timed out")
+        return None
+    except (json.JSONDecodeError, Exception) as e:
+        # JSON parse failed — try text fallback
+        try:
+            result_text = subprocess.run(
+                [_OPENCLAW_BIN, "agents", "list"],
+                capture_output=True, text=True, timeout=15,
+            )
+            if result_text.returncode == 0:
+                return _parse_agents_text(result_text.stdout)
+        except Exception:
+            pass
+        print(f"  [OASIS] ⚠️ openclaw agents list parse error: {e}")
+        return None
+
+
+def _parse_agents_text(text: str) -> list[dict]:
+    """Parse the human-readable output of ``openclaw agents list``.
+
+    Example output::
+
+        Agents:
+        - main (default)
+          Workspace: ~/.openclaw/workspace
+          Agent dir: /projects/.openclaw/agents/main/agent
+          Model: gongfeng/auto
+          Routing rules: 0
+          Routing: default (no explicit rules)
+        - test1
+          Workspace: /projects/.openclaw/test1
+          Agent dir: /projects/.openclaw/agents/test1/agent
+          Model: gongfeng/auto
+          Routing rules: 0
+
+    Returns a list of dicts with keys: name, model, workspace, is_default.
+    """
+    agents: list[dict] = []
+    current: dict | None = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- "):
+            # New agent entry
+            if current:
+                agents.append(current)
+            name_part = stripped[2:].strip()
+            is_default = "(default)" in name_part
+            name = name_part.replace("(default)", "").strip()
+            current = {"name": name, "is_default": is_default, "model": "", "workspace": ""}
+        elif current and stripped.startswith("Model:"):
+            current["model"] = stripped.split(":", 1)[1].strip()
+        elif current and stripped.startswith("Workspace:"):
+            current["workspace"] = stripped.split(":", 1)[1].strip()
+    if current:
+        agents.append(current)
+    return agents
 
 
 @app.get("/sessions/openclaw")
-async def list_openclaw_sessions(filter: str = Query("")):
-    """List OpenClaw sessions from sessions.json file."""
-    if not os.path.exists(_OPENCLAW_SESSIONS_FILE):
-        return {"sessions": [], "available": False, "message": "OpenClaw sessions file not found"}
+async def list_openclaw_agents(filter: str = Query("")):
+    """List OpenClaw agents via ``openclaw agents list`` enriched with config data.
 
-    try:
-        with open(_OPENCLAW_SESSIONS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        raise HTTPException(500, f"Failed to read OpenClaw sessions: {e}")
-
-    # Support both dict (key->session) and list formats
-    sessions = []
-    if isinstance(data, dict):
-        for k, v in data.items():
-            if isinstance(v, dict):
-                v.setdefault("key", k)
-                sessions.append(v)
-    elif isinstance(data, list):
-        sessions = data
+    Returns agent-level entries (not individual sessions).
+    Each agent card uses ``agent:<name>`` as the model identifier.
+    """
+    agents = _fetch_openclaw_agents_via_cli()
+    if agents is None:
+        return {"agents": [], "available": False,
+                "message": "openclaw CLI not available or command failed"}
 
     # Keyword filter
     if filter:
-        sessions = [s for s in sessions if filter.lower() in s.get("key", "").lower()]
+        agents = [a for a in agents if filter.lower() in a.get("name", "").lower()]
 
-    # Sort by updatedAt descending
-    sessions.sort(key=lambda s: s.get("updatedAt", 0), reverse=True)
+    # Sort: default agent first, then alphabetical
+    agents.sort(key=lambda a: (not a.get("is_default", False), a.get("name", "")))
 
-    result = [
-        {
-            "key": s.get("key"),
-            "sessionId": s.get("sessionId"),
-            "kind": s.get("kind"),
-            "channel": s.get("channel"),
-            "model": s.get("model"),
-            "updatedAt": s.get("updatedAt"),
-            "contextTokens": s.get("contextTokens", 0),
-            "totalTokens": s.get("totalTokens", 0),
-        }
-        for s in sessions
-    ]
+    # Enrich with full config (skills/tools)
+    full_config = _fetch_openclaw_full_config()
+    config_map = {}
+    if full_config:
+        defaults = full_config.get("defaults", {})
+        for entry in full_config.get("list", []):
+            eid = entry.get("id", "")
+            config_map[eid] = _build_agent_detail(entry, defaults)
+
+    result = []
+    for a in agents:
+        name = a.get("name", "")
+        detail = config_map.get(name, {})
+        result.append({
+            "name": name,
+            "model": a.get("model", ""),
+            "workspace": a.get("workspace", ""),
+            "is_default": a.get("is_default", False),
+            "tools": detail.get("tools", {}),
+            "skills": detail.get("skills", []),
+            "skills_all": detail.get("skills_all", True),
+        })
 
     # Strip /v1/chat/completions suffix — .env stores the full URL,
     # but canvas / YAML only needs the base URL (engine auto-appends the path)
-    raw_url = os.getenv("OPENCLAW_API_URL", "")
+    raw_url = _get_env("OPENCLAW_API_URL", "")
     base_url = raw_url.replace("/v1/chat/completions", "").rstrip("/")
 
     return {
-        "sessions": result,
+        "agents": result,
         "available": True,
-        # Provide OpenClaw-specific endpoint config for auto-fill when dragging into canvas
         "openclaw_api_url": base_url,
-        "openclaw_api_key": os.getenv("OPENCLAW_API_KEY", ""),
+    }
+
+
+def _get_openclaw_default_workspace() -> str | None:
+    """Get the default agent's workspace path via ``openclaw config get agents.defaults.workspace``."""
+    if not _OPENCLAW_BIN:
+        return None
+    try:
+        result = subprocess.run(
+            [_OPENCLAW_BIN, "config", "get", "agents.defaults.workspace"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            return None
+        ws = result.stdout.strip()
+        # Expand ~ in case it's returned as-is
+        return os.path.expanduser(ws) if ws else None
+    except Exception:
+        return None
+
+
+@app.get("/sessions/openclaw/default-workspace")
+async def get_openclaw_default_workspace():
+    """Return the default workspace parent directory so the frontend can show a sensible default."""
+    if not _OPENCLAW_BIN:
+        return JSONResponse({"ok": False, "error": "openclaw CLI not available"}, status_code=500)
+    default_ws = _get_openclaw_default_workspace()
+    if not default_ws:
+        return {"ok": True, "parent_dir": "", "default_workspace": ""}
+    parent_dir = os.path.dirname(default_ws.rstrip("/"))
+    return {"ok": True, "parent_dir": parent_dir, "default_workspace": default_ws}
+
+
+@app.post("/sessions/openclaw/add")
+async def add_openclaw_agent(req: Request):
+    """Create a new OpenClaw agent via ``openclaw agents add <name> --workspace <path> --non-interactive``.
+
+    Accepts optional ``workspace`` from the client; falls back to
+    ``dirname(default_workspace)/workspace-{name}`` if not provided.
+    """
+    if not _OPENCLAW_BIN:
+        return JSONResponse({"ok": False, "error": "openclaw CLI not available"}, status_code=500)
+
+    body = await req.json()
+    name = (body.get("name") or "").strip()
+    if not name:
+        return JSONResponse({"ok": False, "error": "Agent name is required"}, status_code=400)
+
+    # Validate name: alphanumeric, dash, underscore only
+    import re as _re
+    if not _re.match(r'^[a-zA-Z0-9_-]+$', name):
+        return JSONResponse({"ok": False, "error": "Agent name must be alphanumeric (a-z, 0-9, -, _)"}, status_code=400)
+
+    # Workspace: use client-supplied value, or derive from default
+    custom_ws = (body.get("workspace") or "").strip()
+    if custom_ws:
+        new_workspace = os.path.expanduser(custom_ws)
+    else:
+        default_ws = _get_openclaw_default_workspace()
+        if not default_ws:
+            return JSONResponse({"ok": False, "error": "Cannot detect default agent workspace. Is openclaw configured?"}, status_code=500)
+        parent_dir = os.path.dirname(default_ws.rstrip("/"))
+        new_workspace = os.path.join(parent_dir, f"workspace-{name}")
+
+    # Check if agent already exists
+    existing = _fetch_openclaw_agents_via_cli() or []
+    if any(a.get("name") == name for a in existing):
+        return JSONResponse({"ok": False, "error": f"Agent '{name}' already exists"}, status_code=409)
+
+    # Execute: openclaw agents add <name> --workspace <path> --non-interactive
+    try:
+        result = subprocess.run(
+            [_OPENCLAW_BIN, "agents", "add", name, "--workspace", new_workspace, "--non-interactive"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode != 0:
+            err_msg = (result.stderr or result.stdout or "Unknown error").strip()[:500]
+            print(f"  [OASIS] ⚠️ openclaw agents add failed (rc={result.returncode}): {err_msg}")
+            return JSONResponse({"ok": False, "error": err_msg}, status_code=500)
+
+        return {
+            "ok": True,
+            "name": name,
+            "workspace": new_workspace,
+            "message": f"Agent '{name}' created successfully",
+        }
+    except subprocess.TimeoutExpired:
+        return JSONResponse({"ok": False, "error": "Command timed out"}, status_code=504)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+# Core files that OpenClaw agents typically have
+_OPENCLAW_CORE_FILES = [
+    "BOOTSTRAP.md", "SOUL.md", "IDENTITY.md", "AGENTS.md",
+    "TOOLS.md", "USER.md", "HEARTBEAT.md", "MEMORY.md",
+]
+
+
+@app.get("/sessions/openclaw/workspace-files")
+async def list_openclaw_workspace_files(workspace: str = Query(...)):
+    """List core .md files in an OpenClaw agent's workspace directory (fixed list only)."""
+    ws = os.path.expanduser(workspace.strip())
+    if not os.path.isdir(ws):
+        return JSONResponse({"ok": False, "error": f"Workspace not found: {workspace}"}, status_code=404)
+
+    files = []
+    for fname in _OPENCLAW_CORE_FILES:
+        fpath = os.path.join(ws, fname)
+        exists = os.path.isfile(fpath)
+        size = os.path.getsize(fpath) if exists else 0
+        files.append({"name": fname, "exists": exists, "size": size})
+
+    return {"ok": True, "workspace": ws, "files": files}
+
+
+@app.get("/sessions/openclaw/workspace-file")
+async def read_openclaw_workspace_file(workspace: str = Query(...), filename: str = Query(...)):
+    """Read a single file from an OpenClaw agent's workspace."""
+    ws = os.path.expanduser(workspace.strip())
+    # Security: prevent path traversal
+    safe_name = os.path.basename(filename.strip())
+    fpath = os.path.join(ws, safe_name)
+
+    if not os.path.isfile(fpath):
+        return {"ok": True, "content": "", "exists": False, "filename": safe_name}
+
+    try:
+        with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+        return {"ok": True, "content": content, "exists": True, "filename": safe_name,
+                "size": os.path.getsize(fpath)}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/sessions/openclaw/workspace-file")
+async def save_openclaw_workspace_file(req: Request):
+    """Save/create a file in an OpenClaw agent's workspace."""
+    body = await req.json()
+    workspace = (body.get("workspace") or "").strip()
+    filename = (body.get("filename") or "").strip()
+    content = body.get("content", "")
+
+    if not workspace or not filename:
+        return JSONResponse({"ok": False, "error": "workspace and filename are required"}, status_code=400)
+
+    ws = os.path.expanduser(workspace)
+    safe_name = os.path.basename(filename)
+    fpath = os.path.join(ws, safe_name)
+
+    if not os.path.isdir(ws):
+        return JSONResponse({"ok": False, "error": f"Workspace not found: {workspace}"}, status_code=404)
+
+    try:
+        with open(fpath, "w", encoding="utf-8") as f:
+            f.write(content)
+        return {"ok": True, "filename": safe_name, "size": os.path.getsize(fpath)}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+# ------------------------------------------------------------------
+# OpenClaw agent full config (skills, tools, profile)
+# ------------------------------------------------------------------
+
+# Tool groups and profiles (mirroring OpenClaw 2026 spec)
+_OPENCLAW_TOOL_GROUPS = {
+    "group:runtime": ["exec", "bash", "process"],
+    "group:fs": ["read", "write", "edit", "apply_patch"],
+    "group:sessions": ["sessions_list", "session_status"],
+    "group:web": ["web_search", "web_fetch"],
+    "group:ui": ["browser", "canvas"],
+    "group:nodes": ["nodes"],
+}
+
+_OPENCLAW_TOOL_PROFILES = {
+    "minimal": {"description": "Status queries only", "groups": []},
+    "coding": {"description": "Basic dev (fs + runtime)", "groups": ["group:fs", "group:runtime"]},
+    "messaging": {"description": "Communication focus", "groups": []},
+    "full": {"description": "Unrestricted (all tools)", "groups": list(_OPENCLAW_TOOL_GROUPS.keys())},
+}
+
+
+def _fetch_openclaw_full_config() -> dict | None:
+    """Call ``openclaw config get agents`` and return the full agents config object."""
+    if not _OPENCLAW_BIN:
+        return None
+    try:
+        result = subprocess.run(
+            [_OPENCLAW_BIN, "config", "get", "agents"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            print(f"  [OASIS] ⚠️ openclaw config get agents failed: {result.stderr.strip()[:200]}")
+            return None
+        # The output may contain a banner line before the JSON
+        raw = result.stdout
+        # Find the first '{' to start of JSON
+        idx = raw.find('{')
+        if idx < 0:
+            return None
+        json_str = raw[idx:]
+        return json.loads(json_str)
+    except (json.JSONDecodeError, subprocess.TimeoutExpired, Exception) as e:
+        print(f"  [OASIS] ⚠️ openclaw config get agents parse error: {e}")
+        return None
+
+
+def _build_agent_detail(agent_cfg: dict, defaults: dict) -> dict:
+    """Build a normalized agent detail object from a config entry."""
+    agent_id = agent_cfg.get("id", "")
+    tools_cfg = agent_cfg.get("tools", {})
+    profile = tools_cfg.get("profile", "")
+    also_allow = tools_cfg.get("alsoAllow", tools_cfg.get("allow", []))
+    deny = tools_cfg.get("deny", [])
+
+    # Skills: if not set, means "all available"
+    skills_cfg = agent_cfg.get("skills", None)
+    skills_all = skills_cfg is None  # True = unrestricted
+
+    return {
+        "id": agent_id,
+        "name": agent_cfg.get("name", agent_id),
+        "workspace": agent_cfg.get("workspace", defaults.get("workspace", "")),
+        "agentDir": agent_cfg.get("agentDir", ""),
+        "is_default": agent_cfg.get("isDefault", False),
+        "model": (agent_cfg.get("model", {}) if isinstance(agent_cfg.get("model"), dict)
+                  else {"primary": agent_cfg.get("model", "")}),
+        "tools": {
+            "profile": profile,
+            "alsoAllow": also_allow if isinstance(also_allow, list) else [],
+            "deny": deny if isinstance(deny, list) else [],
+        },
+        "skills": skills_cfg if isinstance(skills_cfg, list) else [],
+        "skills_all": skills_all,
+    }
+
+
+@app.get("/sessions/openclaw/agent-detail")
+async def get_openclaw_agent_detail(name: str = Query(...)):
+    """Return detailed config for a single OpenClaw agent (skills, tools, profile)."""
+    config = _fetch_openclaw_full_config()
+    if config is None:
+        return JSONResponse({"ok": False, "error": "Cannot read openclaw config"}, status_code=500)
+
+    defaults = config.get("defaults", {})
+    agent_list = config.get("list", [])
+    for a in agent_list:
+        if a.get("id") == name or a.get("name") == name:
+            detail = _build_agent_detail(a, defaults)
+            return {"ok": True, "agent": detail}
+
+    return JSONResponse({"ok": False, "error": f"Agent '{name}' not found"}, status_code=404)
+
+
+@app.get("/sessions/openclaw/skills")
+async def list_openclaw_skills():
+    """Return all available OpenClaw skills via ``openclaw skills list --json``."""
+    if not _OPENCLAW_BIN:
+        return JSONResponse({"ok": False, "error": "openclaw CLI not available"}, status_code=500)
+    try:
+        result = subprocess.run(
+            [_OPENCLAW_BIN, "skills", "list", "--json"],
+            capture_output=True, text=True, timeout=20,
+        )
+        if result.returncode != 0:
+            # Fallback: try without --json
+            result2 = subprocess.run(
+                [_OPENCLAW_BIN, "skills", "list"],
+                capture_output=True, text=True, timeout=20,
+            )
+            if result2.returncode != 0:
+                return JSONResponse({"ok": False, "error": "skills list command failed"}, status_code=500)
+            # Parse text output: lines like "  skill-name  (eligible)"
+            skills = []
+            for line in result2.stdout.splitlines():
+                stripped = line.strip()
+                if not stripped or stripped.startswith("Skills") or stripped.startswith("─"):
+                    continue
+                # Extract skill name (first token)
+                parts = stripped.split()
+                if parts:
+                    sname = parts[0].strip("•-● ")
+                    if sname:
+                        eligible = "eligible" in stripped.lower() or "✓" in stripped
+                        skills.append({"name": sname, "eligible": eligible})
+            return {"ok": True, "skills": skills}
+
+        raw = result.stdout
+        idx = raw.find('{')
+        if idx < 0:
+            idx = raw.find('[')
+        if idx < 0:
+            return {"ok": True, "skills": []}
+        json_str = raw[idx:]
+        data = json.loads(json_str)
+        if isinstance(data, dict):
+            skills_list = data.get("skills", [])
+        elif isinstance(data, list):
+            skills_list = data
+        else:
+            skills_list = []
+        # Normalize
+        skills = []
+        for s in skills_list:
+            if isinstance(s, str):
+                skills.append({"name": s, "eligible": True})
+            elif isinstance(s, dict):
+                skills.append({"name": s.get("name", s.get("id", "")), "eligible": s.get("eligible", True)})
+        return {"ok": True, "skills": skills}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/sessions/openclaw/tool-groups")
+async def list_openclaw_tool_groups():
+    """Return available tool groups and profiles (static metadata)."""
+    return {
+        "ok": True,
+        "groups": {k: v for k, v in _OPENCLAW_TOOL_GROUPS.items()},
+        "profiles": {k: v for k, v in _OPENCLAW_TOOL_PROFILES.items()},
+    }
+
+
+@app.post("/sessions/openclaw/update-config")
+async def update_openclaw_agent_config(req: Request):
+    """Update an agent's skills/tools config via ``openclaw config set``.
+
+    Body: { agent_name, skills?: [...], tools?: { profile?, alsoAllow?, deny? } }
+    """
+    if not _OPENCLAW_BIN:
+        return JSONResponse({"ok": False, "error": "openclaw CLI not available"}, status_code=500)
+
+    body = await req.json()
+    agent_name = (body.get("agent_name") or "").strip()
+    if not agent_name:
+        return JSONResponse({"ok": False, "error": "agent_name is required"}, status_code=400)
+
+    # Find agent index in the list
+    config = _fetch_openclaw_full_config()
+    if config is None:
+        return JSONResponse({"ok": False, "error": "Cannot read openclaw config"}, status_code=500)
+
+    agent_list = config.get("list", [])
+    agent_idx = None
+    for i, a in enumerate(agent_list):
+        if a.get("id") == agent_name or a.get("name") == agent_name:
+            agent_idx = i
+            break
+    if agent_idx is None:
+        return JSONResponse({"ok": False, "error": f"Agent '{agent_name}' not found"}, status_code=404)
+
+    errors = []
+
+    # Update skills
+    if "skills" in body:
+        skills_val = body["skills"]
+        if skills_val is None:
+            # Remove skills field = unrestricted
+            try:
+                subprocess.run(
+                    [_OPENCLAW_BIN, "config", "set", f"agents.list[{agent_idx}].skills", "null"],
+                    capture_output=True, text=True, timeout=10,
+                )
+            except Exception as e:
+                errors.append(f"skills: {e}")
+        else:
+            skills_json = json.dumps(skills_val)
+            try:
+                subprocess.run(
+                    [_OPENCLAW_BIN, "config", "set", f"agents.list[{agent_idx}].skills", skills_json],
+                    capture_output=True, text=True, timeout=10,
+                )
+            except Exception as e:
+                errors.append(f"skills: {e}")
+
+    # Update tools
+    if "tools" in body:
+        tools = body["tools"]
+        if isinstance(tools, dict):
+            if "profile" in tools:
+                try:
+                    subprocess.run(
+                        [_OPENCLAW_BIN, "config", "set", f"agents.list[{agent_idx}].tools.profile", json.dumps(tools["profile"])],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                except Exception as e:
+                    errors.append(f"tools.profile: {e}")
+            if "alsoAllow" in tools:
+                try:
+                    subprocess.run(
+                        [_OPENCLAW_BIN, "config", "set", f"agents.list[{agent_idx}].tools.alsoAllow", json.dumps(tools["alsoAllow"])],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                except Exception as e:
+                    errors.append(f"tools.alsoAllow: {e}")
+            if "deny" in tools:
+                try:
+                    subprocess.run(
+                        [_OPENCLAW_BIN, "config", "set", f"agents.list[{agent_idx}].tools.deny", json.dumps(tools["deny"])],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                except Exception as e:
+                    errors.append(f"tools.deny: {e}")
+
+    if errors:
+        return JSONResponse({"ok": False, "errors": errors}, status_code=500)
+    return {"ok": True, "message": f"Agent '{agent_name}' config updated"}
+
+
+# ------------------------------------------------------------------
+# OpenClaw channels + agent bind
+# ------------------------------------------------------------------
+
+def _fetch_openclaw_channels() -> dict | None:
+    """Call ``openclaw channels list --json`` and return the parsed result."""
+    if not _OPENCLAW_BIN:
+        return None
+    try:
+        result = subprocess.run(
+            [_OPENCLAW_BIN, "channels", "list", "--json"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            print(f"  [OASIS] ⚠️ openclaw channels list failed: {result.stderr.strip()[:200]}")
+            return None
+        raw = result.stdout
+        idx = raw.find('{')
+        if idx < 0:
+            return None
+        return json.loads(raw[idx:])
+    except (json.JSONDecodeError, subprocess.TimeoutExpired, Exception) as e:
+        print(f"  [OASIS] ⚠️ openclaw channels parse error: {e}")
+        return None
+
+
+@app.get("/sessions/openclaw/channels")
+async def list_openclaw_channels():
+    """Return all channels with their accounts, suitable for agent binding."""
+    data = _fetch_openclaw_channels()
+    if data is None:
+        return JSONResponse({"ok": False, "error": "Cannot read openclaw channels"}, status_code=500)
+
+    chat = data.get("chat", {})
+    # Build flat list: [{channel: "telegram:ops", type: "chat"}, ...]
+    channels = []
+    for channel_name, accounts in chat.items():
+        if isinstance(accounts, list):
+            for acc in accounts:
+                channels.append({"channel": channel_name, "account": acc, "bind_key": f"{channel_name}:{acc}" if acc != "default" else channel_name})
+        elif isinstance(accounts, str):
+            channels.append({"channel": channel_name, "account": accounts, "bind_key": f"{channel_name}:{accounts}" if accounts != "default" else channel_name})
+
+    return {"ok": True, "channels": channels, "raw": data}
+
+
+@app.get("/sessions/openclaw/agent-bindings")
+async def get_openclaw_agent_bindings(agent: str = Query(...)):
+    """Get current channel bindings for an agent via ``openclaw agents list --json`` or config."""
+    if not _OPENCLAW_BIN:
+        return JSONResponse({"ok": False, "error": "openclaw CLI not available"}, status_code=500)
+    # Try to get bindings from openclaw agents list --json
+    try:
+        result = subprocess.run(
+            [_OPENCLAW_BIN, "agents", "list", "--json"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode == 0:
+            raw = result.stdout
+            idx = raw.find('{')
+            if idx < 0:
+                idx = raw.find('[')
+            if idx >= 0:
+                data = json.loads(raw[idx:])
+                agents_list = data if isinstance(data, list) else data.get("agents", data.get("list", []))
+                for a in agents_list:
+                    aid = a.get("id", a.get("name", ""))
+                    if aid == agent:
+                        bindings = a.get("bindings", a.get("channels", []))
+                        if isinstance(bindings, list):
+                            return {"ok": True, "bindings": bindings}
+                        elif isinstance(bindings, dict):
+                            flat = []
+                            for ch, accs in bindings.items():
+                                if isinstance(accs, list):
+                                    for acc in accs:
+                                        flat.append(f"{ch}:{acc}" if acc != "default" else ch)
+                                else:
+                                    flat.append(f"{ch}:{accs}" if accs != "default" else ch)
+                            return {"ok": True, "bindings": flat}
+    except Exception as e:
+        print(f"  [OASIS] ⚠️ agent bindings parse error: {e}")
+    return {"ok": True, "bindings": []}
+
+
+@app.post("/sessions/openclaw/agent-bind")
+async def openclaw_agent_bind(req: Request):
+    """Bind or unbind a channel to an agent.
+
+    Body: { agent: str, channel: str, action: "bind" | "unbind" }
+    """
+    if not _OPENCLAW_BIN:
+        return JSONResponse({"ok": False, "error": "openclaw CLI not available"}, status_code=500)
+
+    body = await req.json()
+    agent_name = (body.get("agent") or "").strip()
+    channel = (body.get("channel") or "").strip()
+    action = (body.get("action") or "bind").strip()
+
+    if not agent_name or not channel:
+        return JSONResponse({"ok": False, "error": "agent and channel are required"}, status_code=400)
+
+    cmd_action = "bind" if action == "bind" else "unbind"
+    try:
+        result = subprocess.run(
+            [_OPENCLAW_BIN, "agents", cmd_action, "--agent", agent_name, "--bind", channel],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            err = result.stderr.strip() or result.stdout.strip()
+            return JSONResponse({"ok": False, "error": err[:500]}, status_code=500)
+        return {"ok": True, "message": f"Agent '{agent_name}' {cmd_action} '{channel}' success"}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+# --- System Info ---
+
+_TUNNEL_PIDFILE = os.path.join(_project_root, ".tunnel.pid")
+
+
+def _tunnel_running() -> tuple[bool, int | None]:
+    """Check if the cloudflare tunnel process is alive."""
+    if not os.path.isfile(_TUNNEL_PIDFILE):
+        return False, None
+    try:
+        with open(_TUNNEL_PIDFILE) as f:
+            pid = int(f.read().strip())
+        os.kill(pid, 0)
+        return True, pid
+    except (ValueError, OSError):
+        return False, None
+
+
+@app.get("/publicnet/info")
+async def publicnet_info():
+    """Return public network info: tunnel status, public domain, ports, etc.
+
+    This is the canonical way for agents / bots to discover the public URL
+    without needing direct access to .env files.
+    """
+    running, pid = _tunnel_running()
+    domain = ""
+    if running:
+        domain = _get_env("PUBLIC_DOMAIN", "")
+        if domain == "wait to set":
+            domain = ""
+
+    frontend_port = _get_env("PORT_FRONTEND", "51209")
+    oasis_port = _get_env("PORT_OASIS", "51202")
+
+    return {
+        "tunnel": {
+            "running": running,
+            "pid": pid,
+            "public_domain": domain,
+        },
+        "ports": {
+            "frontend": frontend_port,
+            "oasis": oasis_port,
+        },
     }
 
 

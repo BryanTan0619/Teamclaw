@@ -15,7 +15,10 @@ Three expert backends:
      Connects to external endpoints (DeepSeek, GPT-4, Moonshot, Ollama, etc)
      with their own URL and API key. External service is assumed stateful
      (holds conversation history server-side); only incremental context is sent.
-     To integrate with OpenClaw sessions, pass x-openclaw-session-key
+     **OpenClaw CLI priority**: When model matches "agent:<name>:<session>",
+     prefers `openclaw agent --agent <name> --session-id <session> --message ...`
+     CLI over HTTP API. Falls back to HTTP if CLI unavailable or fails.
+     To integrate with OpenClaw sessions via HTTP, pass x-openclaw-session-key
      via the YAML headers field, e.g.:
        headers:
          x-openclaw-session-key: "my-session-id"
@@ -33,8 +36,11 @@ Both participate() methods accept an optional `instruction` parameter,
 which is injected into the expert's prompt to guide their focus.
 """
 
+import asyncio
 import json
 import os
+import re
+import shutil
 import sys
 
 import httpx
@@ -50,8 +56,31 @@ from oasis.forum import DiscussionForum
 # --- 加载 prompt 和专家配置（模块级别，导入时执行一次） ---
 _data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 _prompts_dir = os.path.join(_data_dir, "prompts")
+_agency_prompts_dir = os.path.join(_prompts_dir, "agency_agents")
 
-# 加载公共专家配置
+
+def _load_prompt_file(prompt_file: str) -> str:
+    """Load the full prompt content from an agency_agents .md file.
+
+    Strips YAML frontmatter (--- ... ---) and returns the body text.
+    Returns empty string if file not found.
+    """
+    import re as _re
+    fpath = os.path.join(_agency_prompts_dir, prompt_file)
+    if not os.path.isfile(fpath):
+        return ""
+    try:
+        with open(fpath, "r", encoding="utf-8") as f:
+            content = f.read()
+        # Strip YAML frontmatter
+        fm_match = _re.match(r'^---\s*\n.*?\n---\s*\n', content, _re.DOTALL)
+        body = content[fm_match.end():] if fm_match else content
+        return body.strip()
+    except Exception:
+        return ""
+
+
+# 加载公共专家配置（原始简版）
 _experts_json_path = os.path.join(_prompts_dir, "oasis_experts.json")
 try:
     with open(_experts_json_path, "r", encoding="utf-8") as f:
@@ -65,6 +94,26 @@ except FileNotFoundError:
         {"name": "数据分析师", "tag": "data", "persona": "你是一个数据驱动的分析师，只相信数据和事实。你用数字、案例和逻辑推导来支撑你的观点。", "temperature": 0.5},
         {"name": "综合顾问", "tag": "synthesis", "persona": "你善于综合不同观点，寻找平衡方案，关注实际可操作性。你会识别各方共识，提出兼顾多方利益的务实建议。", "temperature": 0.5},
     ]
+
+# 加载 agency-agents 丰富版专家 prompt 库
+_agency_json_path = os.path.join(_prompts_dir, "agency_experts.json")
+AGENCY_EXPERT_CONFIGS: list[dict] = []
+try:
+    with open(_agency_json_path, "r", encoding="utf-8") as f:
+        _raw_agency = json.load(f)
+    # 为每个 agency 专家加载完整 prompt 并设置 persona
+    _existing_tags = {c["tag"] for c in EXPERT_CONFIGS}
+    for item in _raw_agency:
+        if item["tag"] in _existing_tags:
+            continue  # 跳过与原始专家 tag 冲突的（不应出现）
+        prompt_body = _load_prompt_file(item["prompt_file"])
+        if not prompt_body:
+            continue  # 跳过加载失败的
+        item["persona"] = prompt_body  # 用完整 md 正文作为 persona
+        AGENCY_EXPERT_CONFIGS.append(item)
+    print(f"[prompts] ✅ oasis 已加载 agency_experts.json ({len(AGENCY_EXPERT_CONFIGS)} 位 Agency 专家)")
+except FileNotFoundError:
+    print(f"[prompts] ⚠️ 未找到 {_agency_json_path}，Agency 专家库未启用")
 
 
 # ======================================================================
@@ -108,12 +157,17 @@ def _validate_expert(data: dict) -> dict:
         raise ValueError("专家 tag 不能为空")
     if not persona:
         raise ValueError("专家 persona 不能为空")
-    return {
+    result = {
         "name": name,
         "tag": tag,
         "persona": persona,
         "temperature": float(data.get("temperature", 0.7)),
     }
+    # 保留可选扩展字段
+    for key in ("category", "description", "prompt_file"):
+        if data.get(key):
+            result[key] = data[key]
+    return result
 
 
 def add_user_expert(user_id: str, data: dict) -> dict:
@@ -124,6 +178,8 @@ def add_user_expert(user_id: str, data: dict) -> dict:
         raise ValueError(f"用户已有 tag=\"{expert['tag']}\" 的专家，请换一个 tag 或使用更新功能")
     if any(e["tag"] == expert["tag"] for e in EXPERT_CONFIGS):
         raise ValueError(f"tag=\"{expert['tag']}\" 与公共专家冲突，请换一个 tag")
+    if any(e["tag"] == expert["tag"] for e in AGENCY_EXPERT_CONFIGS):
+        raise ValueError(f"tag=\"{expert['tag']}\" 与 Agency 专家库冲突，请换一个 tag")
     experts.append(expert)
     _save_user_experts(user_id, experts)
     return expert
@@ -153,10 +209,13 @@ def delete_user_expert(user_id: str, tag: str) -> dict:
 
 
 def get_all_experts(user_id: str | None = None) -> list[dict]:
-    """Return public experts + user's custom experts (marked with source)."""
+    """Return public experts + agency experts + user's custom experts (marked with source)."""
     result = [
         {**c, "source": "public"} for c in EXPERT_CONFIGS
     ]
+    result.extend(
+        {**c, "source": "agency"} for c in AGENCY_EXPERT_CONFIGS
+    )
     if user_id:
         result.extend(
             {**c, "source": "custom"} for c in load_user_experts(user_id)
@@ -206,7 +265,16 @@ def _build_discuss_prompt(
         )
 
     # --- Build system part (identity + behavior) ---
-    identity = f"你是论坛专家「{expert_name}」。{persona}" if persona else ""
+    # 判断是否是丰富的 agency 专家 prompt（含 markdown 标题）
+    _is_rich_persona = persona and ("## " in persona or "# " in persona)
+    if _is_rich_persona:
+        # Agency 专家：完整 prompt 已包含身份/职责/规则等，直接使用
+        identity = (
+            f"你在 OASIS 论坛中的显示名称是「{expert_name}」。\n\n"
+            f"以下是你的完整身份与行为指南：\n\n{persona}"
+        )
+    else:
+        identity = f"你是论坛专家「{expert_name}」。{persona}" if persona else ""
     sys_parts = [p for p in [
         identity,
         "在接下来的讨论中，你将收到论坛的新增内容，需要以 JSON 格式回复你的观点和投票。",
@@ -219,7 +287,7 @@ def _build_discuss_prompt(
     user_prompt = (
         f"讨论主题: {question}\n\n"
         f"当前论坛内容:\n{posts_text}\n\n"
-        "请以严格的 JSON 格式回复（不要包含 markdown 代码块标记，不要包含注释）:\n"
+        "请以严格的 JSON 格式回复（有时需要包裹zai（不要包含 markdown 代码块标记，不要包含注释）:\n"
         "{\n"
         '  "reply_to": 2,\n'
         '  "content": "你的观点（200字以内，观点鲜明）",\n'
@@ -237,6 +305,20 @@ def _build_discuss_prompt(
         return system_prompt, user_prompt
     else:
         return f"{system_prompt}\n\n{user_prompt}"
+
+
+def _build_identity_prompt(expert_name: str, persona: str) -> str:
+    """Build identity text for execute mode. Handles both short and rich personas."""
+    if not persona:
+        return ""
+    _is_rich = "## " in persona or "# " in persona
+    if _is_rich:
+        return (
+            f"你在 OASIS 论坛中的显示名称是「{expert_name}」。\n\n"
+            f"以下是你的完整身份与行为指南：\n\n{persona}\n\n"
+        )
+    else:
+        return f"你是「{expert_name}」。{persona}\n\n"
 
 
 def _format_posts(posts) -> str:
@@ -319,12 +401,24 @@ class ExpertAgent:
         self.tag = tag
         self.llm = _get_llm(temperature)
 
-    async def participate(self, forum: DiscussionForum, instruction: str = "", discussion: bool = True):
-        others = await forum.browse(viewer=self.name, exclude_self=True)
+    async def participate(
+        self,
+        forum: DiscussionForum,
+        instruction: str = "",
+        discussion: bool = True,
+        visible_authors: set[str] | None = None,
+        from_round: int | None = None,
+    ):
+        others = await forum.browse(
+            viewer=self.name,
+            exclude_self=True,
+            visible_authors=visible_authors if not discussion else None,
+            from_round=from_round if not discussion else None,
+        )
 
         if not discussion:
             # ── Execute mode: just run the task, no discussion format ──
-            task_prompt = f"你是「{self.title}」。{self.persona}\n\n" if self.persona else ""
+            task_prompt = _build_identity_prompt(self.title, self.persona)
             task_prompt += f"任务主题: {forum.question}\n"
             if instruction:
                 task_prompt += f"\n执行指令: {instruction}\n"
@@ -404,7 +498,7 @@ class SessionExpert:
         self.name = f"{name}#{session_id}"
         self.persona = persona
         self.is_oasis = "#oasis#" in session_id
-        self.timeout = timeout
+        self.timeout = timeout or 500.0
         self.tag = tag
         self._extra_headers = extra_headers or {}
 
@@ -423,14 +517,28 @@ class SessionExpert:
         h.update(self._extra_headers)
         return h
 
-    async def participate(self, forum: DiscussionForum, instruction: str = "", discussion: bool = True):
+    async def participate(
+        self,
+        forum: DiscussionForum,
+        instruction: str = "",
+        discussion: bool = True,
+        visible_authors: set[str] | None = None,
+        from_round: int | None = None,
+    ):
         """
         Participate in one round.
 
         discussion=True: forum discussion mode (JSON reply/vote)
         discussion=False: execute mode — agent just runs the task, output logged to forum
+        visible_authors: (execute mode only) if set, only see posts from these authors (DAG upstream)
+        from_round: (execute mode only) if set, only see posts from this round onward (non-DAG prev round)
         """
-        others = await forum.browse(viewer=self.name, exclude_self=True)
+        others = await forum.browse(
+            viewer=self.name,
+            exclude_self=True,
+            visible_authors=visible_authors if not discussion else None,
+            from_round=from_round if not discussion else None,
+        )
 
         if not discussion:
             # ── Execute mode: send task directly, no JSON format requirement ──
@@ -442,7 +550,7 @@ class SessionExpert:
                 # First call
                 task_parts = []
                 if self.is_oasis and self.persona:
-                    messages.append({"role": "system", "content": f"你是「{self.title}」。{self.persona}"})
+                    messages.append({"role": "system", "content": _build_identity_prompt(self.title, self.persona).strip()})
                 task_parts.append(f"任务主题: {forum.question}")
                 if instruction:
                     task_parts.append(f"\n执行指令: {instruction}")
@@ -471,7 +579,7 @@ class SessionExpert:
                 body["enabled_tools"] = self.enabled_tools
 
             try:
-                async with httpx.AsyncClient(timeout=httpx.Timeout(timeout=self.timeout)) as client:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(timeout=None)) as client:
                     resp = await client.post(
                         self._bot_url, json=body, headers=self._auth_header(),
                     )
@@ -608,23 +716,59 @@ class ExternalExpert:
     ExternalExpert directly calls any OpenAI-compatible endpoint (DeepSeek,
     GPT-4, Moonshot, Ollama, another mini_timebot instance, etc).
 
+    **OpenClaw Agent Support**: When the ``model`` field matches the pattern
+    ``agent:<agent_name>`` (e.g. ``agent:main``), this expert is recognized
+    as an OpenClaw agent. Communication uses the **CLI** as the primary
+    method via ``openclaw agent --agent <name> --message <msg>``.
+    If the CLI is unavailable or fails, the call falls back to the
+    OpenAI-compatible HTTP API (ChatCompletions endpoint).
+
+    Session management is handled entirely by OpenClaw internally —
+    users cannot and do not need to specify session IDs.
+
     The external service is assumed to be **stateful** (maintaining its own
-    conversation history server-side, e.g. via x-openclaw-session-key or
-    similar session tracking headers). Therefore this class sends only
+    conversation history server-side). Therefore this class sends only
     incremental context: first call sends full forum state + identity;
     subsequent calls send only new posts since last participation.
     No local message history is accumulated.
 
     Features:
+      - OpenClaw agents: CLI priority, HTTP API fallback
+      - Non-OpenClaw externals: direct HTTP API call
       - Incremental context (first call = full, subsequent = delta only)
       - Identity injection via system prompt on first call (persona from presets)
       - Works in both discussion mode (JSON reply/vote) and execute mode
       - Supports custom headers via YAML for service-specific needs
-        (e.g. x-openclaw-session-key for OpenClaw session routing)
 
     The external service does NOT need to support session_id or any
     non-standard fields — just standard /v1/chat/completions.
     """
+
+    # Regex to match OpenClaw agent model format: agent:<agent_name>
+    _OPENCLAW_MODEL_RE = re.compile(r"^agent:([^:]+)$")
+
+    # Oasis reply protocol: require agent to wrap reply with start/end tags
+    _OASIS_REPLY_START = "[oasis reply start]"
+    _OASIS_REPLY_END = "[oasis reply end]"
+    _OASIS_REPLY_INSTRUCTION = (
+        "\n\n⚠️ IMPORTANT — [oasis reply] protocol:\n"
+        "当你需要发布任何给其他 agent 或公开的信息时，必须用标签包裹：\n"
+        "   [oasis reply start]\n"
+        "   你要发布的内容……\n"
+        "   [oasis reply end]\n"
+        "注意：一轮只能发布一次，没有被标签包裹的内容不会被发布。\n\n"
+        "例如，讨论模式下的回复格式：\n"
+        "[oasis reply start]\n"
+        "{\n"
+        '  "reply_to": 2,\n'
+        '  "content": "你的观点（200字以内，观点鲜明）",\n'
+        '  "votes": [\n'
+        '    {"post_id": 1, "direction": "up"}\n'
+        "  ]\n"
+        "}\n"
+        "[oasis reply end]"
+    )
+    _OASIS_REPLY_MAX_RETRIES = 10
 
     def __init__(
         self,
@@ -642,17 +786,32 @@ class ExternalExpert:
         self.ext_id = ext_id
         self.name = f"{name}#ext#{ext_id}"
         self.persona = persona
-        self.timeout = timeout or 120.0
+        self.timeout = timeout or 500.0
         self.tag = tag
         self.model = model
         self._extra_headers = extra_headers or {}
 
+        # Detect OpenClaw agent model pattern: agent:<agent_name>
+        m = self._OPENCLAW_MODEL_RE.match(model)
+        if m:
+            self._is_openclaw_agent = True
+            self._oc_agent_name = m.group(1)
+            self._openclaw_bin = shutil.which("openclaw")
+            print(f"  [OASIS] 🦞 OpenClaw agent detected: agent={self._oc_agent_name}"
+                  f" — CLI priority"
+                  f"{', CLI available' if self._openclaw_bin else ', CLI NOT found (HTTP only)'}")
+        else:
+            self._is_openclaw_agent = False
+            self._oc_agent_name = ""
+            self._openclaw_bin = None
+
         # Normalize api_url: strip trailing slash, build full URL
-        api_url = api_url.rstrip("/")
-        if not api_url.endswith("/v1/chat/completions"):
-            if not api_url.endswith("/v1"):
-                api_url += "/v1"
-            api_url += "/chat/completions"
+        if api_url:
+            api_url = api_url.rstrip("/")
+            if not api_url.endswith("/v1/chat/completions"):
+                if not api_url.endswith("/v1"):
+                    api_url += "/v1"
+                api_url += "/chat/completions"
         self._api_url = api_url
         self._api_key = api_key
 
@@ -667,22 +826,221 @@ class ExternalExpert:
         h.update(self._extra_headers)
         return h
 
-    async def _call_api(self, messages: list[dict]) -> str:
-        """Send messages to external API and return the assistant response text."""
+    async def _call_openclaw_cli(self, message: str, timeout: float | None = ...) -> str:
+        """Call OpenClaw agent via CLI command.
+
+        Runs: openclaw agent --agent <name> --message <msg>
+        Returns the stdout output (agent's reply).
+        Raises RuntimeError if CLI fails.
+        """
+        cmd = [
+            self._openclaw_bin,
+            "agent",
+            "--agent", self._oc_agent_name,
+            "--message", message,
+        ]
+        print(f"  [OASIS] 🦞 CLI call: openclaw agent --agent {self._oc_agent_name} "
+              f"--message <{len(message)} chars>")
+        effective_timeout = self.timeout if timeout is ... else timeout
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=effective_timeout
+            )
+            stdout_text = stdout.decode("utf-8", errors="replace").strip()
+            stderr_text = stderr.decode("utf-8", errors="replace").strip()
+
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    f"openclaw CLI exit code {proc.returncode}: "
+                    f"{stderr_text or stdout_text}"
+                )
+
+            # OpenClaw CLI output may contain a header line like:
+            # "🦞 OpenClaw 2026.3.1 (unknown) — Less middlemen, more messages."
+            # and decorative lines (│, ◇, etc). Extract the actual reply.
+            reply = self._parse_openclaw_output(stdout_text)
+            if not reply:
+                raise RuntimeError(f"Empty response from openclaw CLI. Raw: {stdout_text[:200]}")
+            return reply
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"openclaw CLI timed out after {effective_timeout}s")
+
+    @staticmethod
+    def _parse_openclaw_output(raw: str) -> str:
+        """Parse openclaw agent CLI output, stripping decorative lines.
+
+        The CLI typically outputs:
+            🦞 OpenClaw 2026.3.1 (unknown) — Less middlemen, more messages.
+            │
+            ◇
+            <actual reply content>
+
+        We strip the header/decorative lines and return the meaningful content.
+        """
+        lines = raw.split("\n")
+        content_lines = []
+        skip_header = True
+        for line in lines:
+            stripped = line.strip()
+            # Skip known decorative/header patterns
+            if skip_header:
+                if (stripped.startswith("🦞") or
+                    stripped in ("│", "◇", "◆", "└", "") or
+                    stripped.startswith("OpenClaw")):
+                    continue
+                skip_header = False
+            content_lines.append(line)
+        return "\n".join(content_lines).strip()
+
+    async def _call_api(self, messages: list[dict], timeout_override: float | None = ...) -> str:
+        """Send messages to external API and return the assistant response text.
+
+        For OpenClaw agents: CLI priority, HTTP API fallback.
+        For non-OpenClaw externals: direct HTTP API call.
+
+        Args:
+            timeout_override: Explicit timeout value. None = no timeout;
+                              ... (default sentinel) = use self.timeout.
+        """
+        effective_timeout = self.timeout if timeout_override is ... else timeout_override
+
+        # ── OpenClaw agents: CLI priority ──
+        if self._is_openclaw_agent and self._openclaw_bin:
+            cli_message = ""
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    cli_message = msg.get("content", "")
+                    break
+            if not cli_message:
+                cli_message = messages[-1].get("content", "") if messages else ""
+            try:
+                reply = await self._call_openclaw_cli(cli_message, timeout=effective_timeout)
+                print(f"  [OASIS] 🦞 CLI success for {self.name}")
+                return reply
+            except Exception as cli_err:
+                print(f"  [OASIS] ⚠️ CLI failed for {self.name}: {cli_err}")
+                print(f"  [OASIS] 🔄 Falling back to HTTP API")
+                # Fall through to HTTP API below
+
+        # ── HTTP API call (primary for non-OpenClaw, fallback for OpenClaw) ──
+        if not self._api_url:
+            raise RuntimeError(f"No api_url configured for {self.name} and CLI unavailable/failed")
         body = {
             "model": self.model,
             "messages": messages,
             "stream": False,
         }
-        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout=self.timeout)) as client:
-            resp = await client.post(self._api_url, json=body, headers=self._headers())
-        if resp.status_code != 200:
-            raise RuntimeError(f"External API error {resp.status_code}: {resp.text[:300]}")
-        data = resp.json()
-        return data["choices"][0]["message"]["content"]
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(timeout=effective_timeout)) as client:
+                resp = await client.post(self._api_url, json=body, headers=self._headers())
+            if resp.status_code != 200:
+                raise RuntimeError(f"External API error {resp.status_code}: {resp.text[:300]}")
+            data = resp.json()
+            return data["choices"][0]["message"]["content"]
+        except Exception as api_err:
+            raise RuntimeError(f"API call failed for {self.name}: {api_err}")
 
-    async def participate(self, forum: DiscussionForum, instruction: str = "", discussion: bool = True):
-        others = await forum.browse(viewer=self.name, exclude_self=True)
+    def _inject_oasis_reply_instruction(self, messages: list[dict]) -> None:
+        """Append [oasis reply] instruction to the last user message (openclaw only)."""
+        if not self._is_openclaw_agent:
+            return
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                msg["content"] = msg["content"] + self._OASIS_REPLY_INSTRUCTION
+                return
+
+    # Flexible regex patterns for oasis reply tags (accept variants like [/oasis reply end])
+    _OASIS_START_RE = re.compile(r"\[/?oasis\s+reply\s+/?start\]", re.IGNORECASE)
+    _OASIS_END_RE = re.compile(r"\[/?oasis\s+reply\s+/?end\]", re.IGNORECASE)
+
+    @staticmethod
+    def _extract_oasis_reply(text: str, start_tag: str, end_tag: str) -> tuple[str, str | None]:
+        """Parse a single reply for [oasis reply start/end] tags.
+
+        Returns (status, content):
+          - ("complete", final_text)  — both start and end found
+          - ("started", after_start)  — start found but no end, returns content after start
+          - ("missing", None)         — no start tag found
+        """
+        sm = ExternalExpert._OASIS_START_RE.search(text)
+        if sm is None:
+            return ("missing", None)
+        after = text[sm.end():]
+        em = ExternalExpert._OASIS_END_RE.search(after)
+        if em is not None:
+            return ("complete", after[:em.start()].strip())
+        return ("started", after.strip())
+
+    async def _call_api_with_oasis_check(self, messages: list[dict], **kwargs) -> str:
+        """Call API up to _OASIS_REPLY_MAX_RETRIES times within one participate turn.
+
+        Within a single turn, call the API repeatedly (up to 3 times):
+          - If a complete [oasis reply start]...[oasis reply end] is found → return content
+          - If start is found without end → buffer and call again
+          - If neither tag is found → buffer raw reply and call again
+          - After 3 calls without complete → return all buffered content joined together
+
+        Each participate() call is independent; no state carries across rounds.
+        """
+        if not self._is_openclaw_agent:
+            return await self._call_api(messages, **kwargs)
+
+        self._inject_oasis_reply_instruction(messages)
+
+        buf: list[str] = []
+        start_tag = self._OASIS_REPLY_START
+        end_tag = self._OASIS_REPLY_END
+
+        for attempt in range(1, self._OASIS_REPLY_MAX_RETRIES + 1):
+            raw_reply = await self._call_api(messages, **kwargs)
+            status, content = self._extract_oasis_reply(raw_reply, start_tag, end_tag)
+
+            if status == "complete":
+                # If we had buffered content before this, prepend it
+                if buf:
+                    buf.append(content)
+                    return "\n\n".join(seg for seg in buf if seg)
+                return content
+
+            if status == "started":
+                # Start tag found but no end — buffer content after start
+                buf.append(content)
+                print(f"  [OASIS] 📝 {self.name} [oasis reply start] found, no end yet "
+                      f"(call {attempt}/{self._OASIS_REPLY_MAX_RETRIES})")
+            else:
+                # "missing" — no tags, expert still thinking
+                buf.append(raw_reply.strip())
+                print(f"  [OASIS] 💭 {self.name} thinking, no oasis reply tags "
+                      f"(call {attempt}/{self._OASIS_REPLY_MAX_RETRIES})")
+
+            # Feed reply back into conversation for next attempt
+            messages.append({"role": "assistant", "content": raw_reply})
+            messages.append({"role": "user", "content": "请继续。如果你已经结束发言，请添加 [oasis reply end] 标签。如果你已回复，请重新按照格式严格回复。"})
+
+        # All attempts exhausted — return everything we collected
+        print(f"  [OASIS] ⚠️ {self.name} {self._OASIS_REPLY_MAX_RETRIES} calls without "
+              f"[oasis reply end], publishing collected content")
+        return "\n\n".join(seg for seg in buf if seg)
+
+    async def participate(
+        self,
+        forum: DiscussionForum,
+        instruction: str = "",
+        discussion: bool = True,
+        visible_authors: set[str] | None = None,
+        from_round: int | None = None,
+    ):
+        others = await forum.browse(
+            viewer=self.name,
+            exclude_self=True,
+            visible_authors=visible_authors if not discussion else None,
+            from_round=from_round if not discussion else None,
+        )
 
         if not discussion:
             # ── Execute mode ──
@@ -692,7 +1050,7 @@ class ExternalExpert:
             messages: list[dict] = []
             if not self._initialized:
                 if self.persona:
-                    messages.append({"role": "system", "content": f"你是「{self.title}」。{self.persona}"})
+                    messages.append({"role": "system", "content": _build_identity_prompt(self.title, self.persona).strip()})
                 task_parts = [f"任务主题: {forum.question}"]
                 if instruction:
                     task_parts.append(f"\n执行指令: {instruction}")
@@ -711,9 +1069,12 @@ class ExternalExpert:
                 messages.append({"role": "user", "content": "\n".join(ctx_parts)})
 
             try:
-                reply = await self._call_api(messages)
-                await forum.publish(author=self.name, content=reply.strip()[:2000])
-                print(f"  [OASIS] ✅ {self.name} (external) 执行完成")
+                reply = await self._call_api_with_oasis_check(messages, timeout_override=None)
+                if reply is None:
+                    print(f"  [OASIS] 📝 {self.name} (external) collecting oasis reply, skipping publish")
+                else:
+                    await forum.publish(author=self.name, content=reply.strip()[:2000])
+                    print(f"  [OASIS] ✅ {self.name} (external) 执行完成")
             except Exception as e:
                 print(f"  [OASIS] ❌ {self.name} (external) error: {e}")
             return
@@ -740,30 +1101,35 @@ class ExternalExpert:
                     f"【第 {forum.current_round} 轮讨论更新】\n"
                     f"以下是自你上次发言后的 {len(new_posts)} 条新帖子：\n\n"
                     f"{new_text}\n\n"
-                    "请基于这些新观点以及你之前看到的讨论内容，以 JSON 格式回复：\n"
+                    "请基于这些新观点以及你之前看到的讨论内容，以严格的 JSON 格式回复"
+                    "（不要包含 markdown 代码块标记，不要包含注释）：\n"
+                    "[oasis reply start]\n"
                     "{\n"
                     '  "reply_to": <某个帖子ID>,\n'
-                    '  "content": "你的观点（200字以内）",\n'
+                    '  "content": "你的观点（200字以内，观点鲜明）",\n'
                     '  "votes": [{"post_id": <ID>, "direction": "up或down"}]\n'
-                    "}"
+                    "}\n"
+                    "[oasis reply end]"
                 )
             else:
                 prompt = (
                     f"【第 {forum.current_round} 轮讨论更新】\n"
                     "本轮没有新的帖子。如果你有新的想法或补充，可以继续发言；"
                     "如果没有，回复一个空 content 即可。\n"
+                    "[oasis reply start]\n"
                     "{\n"
                     '  "reply_to": null,\n'
                     '  "content": "",\n'
                     '  "votes": []\n'
-                    "}"
+                    "}\n"
+                    "[oasis reply end]"
                 )
             if instruction:
                 prompt += f"\n\n📋 本轮你的专项指令：{instruction}\n请在回复中重点关注和执行这个指令。"
             messages.append({"role": "user", "content": prompt})
 
         try:
-            reply = await self._call_api(messages)
+            reply = await self._call_api_with_oasis_check(messages)
             result = _parse_expert_response(reply)
             await _apply_response(result, self.name, forum, others)
         except json.JSONDecodeError as e:

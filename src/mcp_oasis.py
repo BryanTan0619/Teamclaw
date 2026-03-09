@@ -70,6 +70,7 @@ async def list_oasis_experts(username: str = "") -> str:
                 return "📭 暂无可用专家"
 
             public = [e for e in experts if e.get("source") == "public"]
+            agency = [e for e in experts if e.get("source") == "agency"]
             custom = [e for e in experts if e.get("source") == "custom"]
 
             lines = [f"🏛️ OASIS 可用专家 - 共 {len(experts)} 位\n"]
@@ -79,6 +80,30 @@ async def list_oasis_experts(username: str = "") -> str:
                 for e in public:
                     persona_preview = e["persona"][:60] + "..." if len(e["persona"]) > 60 else e["persona"]
                     lines.append(f"  • {e['name']} (tag: \"{e['tag']}\") — {persona_preview}")
+
+            if agency:
+                lines.append(f"\n🌐 Agency 专业专家库 ({len(agency)} 位):")
+                # 按分类分组展示
+                from collections import defaultdict
+                by_cat = defaultdict(list)
+                for e in agency:
+                    cat = e.get("category", "other")
+                    by_cat[cat].append(e)
+                cat_labels = {
+                    "design": "🎨 设计", "engineering": "⚙️ 工程",
+                    "marketing": "📢 营销", "product": "📦 产品",
+                    "project-management": "📋 项目管理",
+                    "spatial-computing": "🥽 空间计算",
+                    "specialized": "🔬 专项", "support": "🛠️ 支持",
+                    "testing": "🧪 测试",
+                }
+                for cat, items in sorted(by_cat.items()):
+                    label = cat_labels.get(cat, cat)
+                    lines.append(f"  {label} ({len(items)} 位):")
+                    for e in items:
+                        desc = e.get("description", "")
+                        desc_preview = desc[:50] + "..." if len(desc) > 50 else desc
+                        lines.append(f"    • {e['name']} (tag: \"{e['tag']}\") — {desc_preview}")
 
             if custom:
                 lines.append(f"\n🔧 自定义专家 ({len(custom)} 位):")
@@ -308,12 +333,13 @@ async def post_to_oasis(
     username: str = "",
     max_rounds: int = 5,
     schedule_file: str = "",
-    detach: bool = False,
     notify_session: str = "",
     discussion: bool = False,
 ) -> str:
     """
     Submit a question or work task to the OASIS forum for multi-expert discussion or execution.
+    Always runs in detach (async) mode — returns immediately with a topic_id.
+    Use check_oasis_discussion(topic_id=...) to check progress and get the conclusion later.
 
     Two modes:
       - discussion=False (default): Execute mode. Agents run tasks sequentially/in parallel per workflow,
@@ -397,14 +423,13 @@ async def post_to_oasis(
         max_rounds: Maximum number of discussion rounds (1-20, default 5)
         schedule_file: Filename or path to a saved YAML workflow file. Short names (e.g. "review.yaml")
             are resolved under data/user_files/{user}/oasis/yaml/. Takes priority over schedule_yaml.
-        detach: If True, return immediately with topic_id. Use check_oasis_discussion later.
         notify_session: (auto-injected) Session ID for completion notification.
         discussion: If False (default), execute mode — agents just run tasks without discussion format.
             If True, forum discussion mode with JSON reply/vote.
             Can also be set in YAML via "discussion: true". When False (default), YAML setting is respected.
 
     Returns:
-        The final conclusion, or (if detach=True) the topic_id for later retrieval
+        The topic_id for later retrieval via check_oasis_discussion()
     """
     effective_user = username or _FALLBACK_USER
 
@@ -425,13 +450,17 @@ async def post_to_oasis(
                 body["discussion"] = True
             else:
                 body["discussion"] = False
-            if detach:
-                port = os.getenv("PORT_AGENT", "51200")
-                body["callback_url"] = f"http://127.0.0.1:{port}/system_trigger"
-                body["callback_session_id"] = notify_session or "default"
+
+            # Always detach mode — set callback for completion notification
+            port = os.getenv("PORT_AGENT", "51200")
+            body["callback_url"] = f"http://127.0.0.1:{port}/system_trigger"
+            body["callback_session_id"] = notify_session or "default"
 
             # schedule_file takes priority over schedule_yaml
             if schedule_file:
+                # Auto-append .yaml if no extension
+                if not schedule_file.endswith((".yaml", ".yml")):
+                    schedule_file += ".yaml"
                 if not os.path.isabs(schedule_file):
                     yaml_dir = os.path.join(
                         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -452,33 +481,12 @@ async def post_to_oasis(
 
             topic_id = resp.json()["topic_id"]
 
-            if detach:
-                return (
-                    f"🏛️ OASIS 任务已提交（脱离模式）\n"
-                    f"主题: {question[:80]}\n"
-                    f"Topic ID: {topic_id}\n\n"
-                    f"💡 使用 check_oasis_discussion(topic_id=\"{topic_id}\") 查看进展和结论。"
-                )
-
-            result = await client.get(
-                f"{OASIS_BASE_URL}/topics/{topic_id}/conclusion",
-                params={"timeout": 280, "user_id": effective_user},
+            return (
+                f"🏛️ OASIS 任务已提交\n"
+                f"主题: {question[:80]}\n"
+                f"Topic ID: {topic_id}\n\n"
+                f"💡 使用 check_oasis_discussion(topic_id=\"{topic_id}\") 查看进展和结论。"
             )
-
-            if result.status_code == 200:
-                data = result.json()
-                return (
-                    f"🏛️ OASIS 论坛讨论完成\n"
-                    f"主题: {data['question']}\n"
-                    f"讨论轮次: {data['rounds']}\n"
-                    f"总帖子数: {data['total_posts']}\n\n"
-                    f"📋 结论:\n{data['conclusion']}\n\n"
-                    f"💡 如需查看完整讨论过程，Topic ID: {topic_id}"
-                )
-            elif result.status_code == 504:
-                return f"⏰ 讨论超时未完成 (Topic ID: {topic_id})，可稍后通过 check_oasis_discussion 查看结果"
-            else:
-                return f"❌ 获取结论失败: {result.text}"
 
     except httpx.ConnectError:
         return _CONN_ERR
@@ -724,6 +732,64 @@ async def list_oasis_workflows(username: str = "") -> str:
 
 
 # ======================================================================
+# Public Network Info (tunnel / public domain)
+# ======================================================================
+
+@mcp.tool()
+async def get_publicnet_info() -> str:
+    """
+    Get public network information — tunnel status, public domain URL, ports, etc.
+
+    Use this to discover the public URL when the cloudflare tunnel is running,
+    so you can share the link with the user (e.g. via Telegram).
+    This does NOT read .env directly — it queries the OASIS server API.
+
+    IMPORTANT: This is a READ-ONLY query tool. It does NOT start or download
+    anything. Starting the tunnel or downloading cloudflared MUST only happen
+    when the user EXPLICITLY requests it — never on the agent's own initiative.
+
+    Returns:
+        Human-readable public network info including tunnel status and public URL.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(f"{OASIS_BASE_URL}/publicnet/info")
+            if resp.status_code != 200:
+                return f"❌ 查询失败: {resp.text}"
+            data = resp.json()
+
+        tunnel = data.get("tunnel", {})
+        ports = data.get("ports", {})
+
+        lines = ["📡 系统信息\n"]
+
+        # Tunnel info
+        if tunnel.get("running"):
+            lines.append("🌐 公网隧道: ✅ 运行中")
+            domain = tunnel.get("public_domain", "")
+            if domain:
+                lines.append(f"   公网地址: {domain}")
+            else:
+                lines.append("   ⏳ 公网地址尚未就绪")
+            lines.append(f"   PID: {tunnel.get('pid')}")
+        else:
+            lines.append("🌐 公网隧道: ❌ 未运行")
+            lines.append("   💡 可通过 selfskill/scripts/run.sh start-tunnel 启动")
+            lines.append("   💡 或在前端 Settings 面板中点击「启动隧道」")
+
+        # Ports
+        lines.append(f"\n📌 端口:")
+        lines.append(f"   前端: {ports.get('frontend', '?')}")
+        lines.append(f"   OASIS: {ports.get('oasis', '?')}")
+
+        return "\n".join(lines)
+    except httpx.ConnectError:
+        return _CONN_ERR
+    except Exception as e:
+        return f"❌ 查询失败: {e}"
+
+
+# ======================================================================
 # YAML → Layout conversion helpers
 # ======================================================================
 
@@ -787,6 +853,18 @@ def _parse_expert_name(raw: str) -> dict:
 
     if len(parts) >= 3 and parts[1] == "ext":
         ext_id = parts[2]
+        # For openclaw agents, ext_id is the agent name (e.g. "main", "test1")
+        if tag == "openclaw":
+            return {
+                "type": "external",
+                "tag": tag,
+                "name": ext_id,
+                "emoji": "🦞",
+                "temperature": 0.7,
+                "instance": 1,
+                "session_id": "",
+                "ext_id": ext_id,
+            }
         return {
             "type": "external",
             "tag": tag,
@@ -817,6 +895,8 @@ def _yaml_to_layout_data(yaml_str: str) -> dict:
 
     Pure deterministic transformation — no LLM needed.
     Nodes are auto-positioned left-to-right (sequential) / top-to-bottom (parallel).
+    Supports DAG mode: steps with ``id`` and ``depends_on`` fields are laid out
+    using topological-level positioning (independent branches in parallel columns).
     """
     data = _yaml.safe_load(yaml_str)
     if not isinstance(data, dict) or "plan" not in data:
@@ -825,6 +905,190 @@ def _yaml_to_layout_data(yaml_str: str) -> dict:
     plan = data.get("plan", [])
     repeat = data.get("repeat", True)
 
+    # Detect DAG mode: any step has an 'id' field
+    is_dag = any(isinstance(s, dict) and "id" in s for s in plan)
+
+    if is_dag:
+        return _yaml_dag_to_layout(plan, repeat)
+    else:
+        return _yaml_linear_to_layout(plan, repeat)
+
+
+def _yaml_dag_to_layout(plan: list, repeat: bool) -> dict:
+    """Convert DAG-mode plan (steps with id/depends_on) to canvas layout.
+
+    Layout strategy (optimised):
+    - Nodes are assigned to layers via longest-path from roots.
+    - Horizontal gap adapts to graph width so the canvas stays readable.
+    - Within each layer, nodes are sorted by the median y-position of their
+      predecessors (barycenter heuristic) to minimise edge crossings.
+    - All y-coordinates are guaranteed ≥ margin (no negative positions).
+    """
+    nodes: list[dict] = []
+    edges: list[dict] = []
+
+    nid = 1
+    eid = 1
+
+    # ── Layout constants ──
+    NODE_W = 160          # approximate rendered width of a canvas-node
+    MARGIN_X = 60         # left margin
+    MARGIN_Y = 40         # top margin
+    GAP_X = 260           # horizontal gap between layers (> NODE_W + breathing room)
+    GAP_Y = 90            # vertical gap between nodes in the same layer
+
+    # First pass: create nodes, build step_id → node_id mapping
+    step_id_to_node_id: dict[str, str] = {}
+    step_items: list[tuple[str, dict, list[str]]] = []  # (step_id, node_dict, depends_on)
+
+    for step in plan:
+        if not isinstance(step, dict):
+            continue
+        step_id = str(step.get("id", ""))
+        depends_on = step.get("depends_on", [])
+        if isinstance(depends_on, str):
+            depends_on = [depends_on]
+
+        node_id = f"on{nid}"; nid += 1
+
+        if "expert" in step:
+            raw = step["expert"]
+            info = _parse_expert_name(raw)
+            node = {
+                "id": node_id,
+                "x": 0, "y": 0,
+                **info,
+                "author": "主持人",
+                "content": step.get("instruction", ""),
+                "source": "",
+            }
+            if info.get("type") == "external":
+                for _ek in ("api_url", "api_key", "model"):
+                    if _ek in step:
+                        node[_ek] = step[_ek]
+                if "headers" in step and isinstance(step["headers"], dict):
+                    node["headers"] = step["headers"]
+        elif "manual" in step:
+            manual = step["manual"]
+            node = {
+                "id": node_id,
+                "x": 0, "y": 0,
+                "type": "manual", "tag": "manual",
+                "name": "手动注入", "emoji": "📝",
+                "temperature": 0, "instance": 1, "session_id": "",
+                "author": manual.get("author", "主持人") if isinstance(manual, dict) else "主持人",
+                "content": manual.get("content", "") if isinstance(manual, dict) else "",
+                "source": "",
+            }
+        elif "all_experts" in step:
+            node = {
+                "id": node_id,
+                "x": 0, "y": 0,
+                "type": "expert", "tag": "all",
+                "name": "全员讨论", "emoji": "👥",
+                "temperature": 0.5, "instance": 1, "session_id": "",
+                "author": "主持人", "content": "", "source": "",
+            }
+        else:
+            continue
+
+        nodes.append(node)
+        if step_id:
+            step_id_to_node_id[step_id] = node_id
+        step_items.append((step_id, node, depends_on))
+
+    # Build edges from depends_on
+    for step_id, node, depends_on in step_items:
+        node_id = node["id"]
+        for dep in depends_on:
+            src_node_id = step_id_to_node_id.get(dep)
+            if src_node_id:
+                edges.append({"id": f"oe{eid}", "source": src_node_id, "target": node_id})
+                eid += 1
+
+    # ── Compute topological layer (longest path from roots) ──
+    preds: dict[str, list[str]] = {}
+    for step_id, _node, depends_on in step_items:
+        preds[step_id] = [d for d in depends_on if d in step_id_to_node_id]
+
+    layer: dict[str, int] = {}
+    def _get_layer(sid: str) -> int:
+        if sid in layer:
+            return layer[sid]
+        deps = preds.get(sid, [])
+        if not deps:
+            layer[sid] = 0
+            return 0
+        lv = max(_get_layer(d) for d in deps) + 1
+        layer[sid] = lv
+        return lv
+
+    for step_id, _node, _deps in step_items:
+        if step_id:
+            _get_layer(step_id)
+
+    # ── Group by layer ──
+    layers: dict[int, list[tuple[str, dict]]] = {}
+    for step_id, node, _deps in step_items:
+        lv = layer.get(step_id, 0)
+        layers.setdefault(lv, []).append((step_id, node))
+
+    # ── Barycenter ordering to reduce edge crossings ──
+    # For layer 0, keep original YAML order.
+    # For subsequent layers, sort nodes by the median y-position of predecessors.
+    node_y: dict[str, float] = {}  # step_id → assigned y
+
+    for lv in sorted(layers.keys()):
+        layer_items = layers[lv]
+
+        if lv > 0:
+            # Compute barycenter for each node
+            def _bary(sid: str) -> float:
+                deps = preds.get(sid, [])
+                ys = [node_y[d] for d in deps if d in node_y]
+                return sum(ys) / len(ys) if ys else 0.0
+            layer_items.sort(key=lambda t: _bary(t[0]))
+            layers[lv] = layer_items
+
+        # Assign y positions — centre the layer vertically
+        count = len(layer_items)
+        total_h = (count - 1) * GAP_Y
+        y_start = MARGIN_Y + max(0, (400 - total_h) // 2)  # aim for ~400px canvas height centre
+        for i, (sid, _node) in enumerate(layer_items):
+            y = y_start + i * GAP_Y
+            node_y[sid] = y
+
+    # ── Assign final x, y coordinates ──
+    for lv, layer_items in sorted(layers.items()):
+        x = MARGIN_X + lv * GAP_X
+        for sid, node in layer_items:
+            node["x"] = x
+            node["y"] = int(node_y.get(sid, MARGIN_Y))
+
+    layout = {
+        "nodes": nodes,
+        "edges": edges,
+        "groups": [],
+        "settings": {
+            "repeat": repeat,
+            "max_rounds": 5,
+            "use_bot_session": False,
+            "cluster_threshold": 150,
+        },
+    }
+    return layout
+
+
+def _yaml_linear_to_layout(plan: list, repeat: bool) -> dict:
+    """Convert linear plan (no id/depends_on) to canvas layout.
+
+    Optimised layout:
+    - Wider horizontal spacing so nodes don't overlap.
+    - Parallel groups: fan-out edges from prev → every member, fan-in edges
+      from every member → next step (instead of only first/last member).
+    - Vertical centering of parallel members around the baseline.
+    - Group boxes with proper padding.
+    """
     nodes: list[dict] = []
     edges: list[dict] = []
     groups: list[dict] = []
@@ -833,12 +1097,15 @@ def _yaml_to_layout_data(yaml_str: str) -> dict:
     eid = 1
     gid = 1
 
-    # Track positions for auto-layout
-    cursor_x = 60
-    step_gap_x = 200
-    parallel_gap_y = 80
-    base_y = 120
-    prev_node_id: str | None = None  # for sequential edge chaining
+    # ── Layout constants ──
+    MARGIN_X = 60
+    BASE_Y = 240           # vertical baseline (enough headroom for parallel groups)
+    GAP_X = 260            # horizontal gap between steps
+    GAP_Y_PARALLEL = 90    # vertical gap between parallel members
+    GROUP_PAD = 30         # padding around group box
+
+    cursor_x = MARGIN_X
+    prev_node_ids: list[str] = []  # may be multiple for fan-in after parallel group
 
     for step in plan:
         if not isinstance(step, dict):
@@ -852,13 +1119,12 @@ def _yaml_to_layout_data(yaml_str: str) -> dict:
             node = {
                 "id": node_id,
                 "x": cursor_x,
-                "y": base_y,
+                "y": BASE_Y,
                 **info,
                 "author": "主持人",
                 "content": step.get("instruction", ""),
                 "source": "",
             }
-            # Carry external agent config fields into the layout node
             if info.get("type") == "external":
                 for _ek in ("api_url", "api_key", "model"):
                     if _ek in step:
@@ -866,22 +1132,24 @@ def _yaml_to_layout_data(yaml_str: str) -> dict:
                 if "headers" in step and isinstance(step["headers"], dict):
                     node["headers"] = step["headers"]
             nodes.append(node)
-            if prev_node_id:
-                edges.append({"id": f"oe{eid}", "source": prev_node_id, "target": node_id})
+            for pid in prev_node_ids:
+                edges.append({"id": f"oe{eid}", "source": pid, "target": node_id})
                 eid += 1
-            prev_node_id = node_id
-            cursor_x += step_gap_x
+            prev_node_ids = [node_id]
+            cursor_x += GAP_X
 
         # --- parallel step ---
         elif "parallel" in step:
             members = step["parallel"]
             if not isinstance(members, list):
                 continue
-            group_node_ids = []
+            group_node_ids: list[str] = []
             group_x = cursor_x
-            y_offset = base_y - ((len(members) - 1) * parallel_gap_y) // 2
+            count = len(members)
+            total_h = (count - 1) * GAP_Y_PARALLEL
+            y_start = BASE_Y - total_h // 2  # centre around baseline
 
-            for item in members:
+            for idx, item in enumerate(members):
                 if isinstance(item, str):
                     raw = item
                     instruction = ""
@@ -896,13 +1164,12 @@ def _yaml_to_layout_data(yaml_str: str) -> dict:
                 node = {
                     "id": node_id,
                     "x": group_x,
-                    "y": y_offset,
+                    "y": y_start + idx * GAP_Y_PARALLEL,
                     **info,
                     "author": "主持人",
                     "content": instruction,
                     "source": "",
                 }
-                # Carry external agent config fields into parallel layout nodes
                 if info.get("type") == "external" and isinstance(item, dict):
                     for _ek in ("api_url", "api_key", "model"):
                         if _ek in item:
@@ -911,15 +1178,14 @@ def _yaml_to_layout_data(yaml_str: str) -> dict:
                         node["headers"] = item["headers"]
                 nodes.append(node)
                 group_node_ids.append(node_id)
-                y_offset += parallel_gap_y
 
             # Create group container
             if group_node_ids:
                 g_nodes = [n for n in nodes if n["id"] in group_node_ids]
-                min_x = min(n["x"] for n in g_nodes) - 30
-                min_y = min(n["y"] for n in g_nodes) - 30
-                max_x = max(n["x"] for n in g_nodes) + 160
-                max_y = max(n["y"] for n in g_nodes) + 60
+                min_x = min(n["x"] for n in g_nodes) - GROUP_PAD
+                min_y = min(n["y"] for n in g_nodes) - GROUP_PAD
+                max_x = max(n["x"] for n in g_nodes) + 160 + GROUP_PAD
+                max_y = max(n["y"] for n in g_nodes) + 50 + GROUP_PAD
                 groups.append({
                     "id": f"og{gid}",
                     "name": "🔀 并行",
@@ -932,13 +1198,15 @@ def _yaml_to_layout_data(yaml_str: str) -> dict:
                 })
                 gid += 1
 
-                # Edge from previous to first member, last member becomes prev
-                if prev_node_id:
-                    edges.append({"id": f"oe{eid}", "source": prev_node_id, "target": group_node_ids[0]})
-                    eid += 1
-                prev_node_id = group_node_ids[-1]
+                # Fan-out: prev → every member
+                for pid in prev_node_ids:
+                    for mid in group_node_ids:
+                        edges.append({"id": f"oe{eid}", "source": pid, "target": mid})
+                        eid += 1
+                # All members become prev (fan-in into next step)
+                prev_node_ids = list(group_node_ids)
 
-            cursor_x += step_gap_x
+            cursor_x += GAP_X
 
         # --- all_experts step ---
         elif "all_experts" in step:
@@ -946,7 +1214,7 @@ def _yaml_to_layout_data(yaml_str: str) -> dict:
             node = {
                 "id": node_id,
                 "x": cursor_x,
-                "y": base_y,
+                "y": BASE_Y,
                 "type": "expert",
                 "tag": "all",
                 "name": "全员讨论",
@@ -959,23 +1227,22 @@ def _yaml_to_layout_data(yaml_str: str) -> dict:
                 "source": "",
             }
             nodes.append(node)
-            # Wrap in all-type group
             groups.append({
                 "id": f"og{gid}",
                 "name": "👥 全员",
                 "type": "all",
                 "x": cursor_x - 20,
-                "y": base_y - 20,
+                "y": BASE_Y - 20,
                 "w": 180,
                 "h": 80,
                 "nodeIds": [node_id],
             })
             gid += 1
-            if prev_node_id:
-                edges.append({"id": f"oe{eid}", "source": prev_node_id, "target": node_id})
+            for pid in prev_node_ids:
+                edges.append({"id": f"oe{eid}", "source": pid, "target": node_id})
                 eid += 1
-            prev_node_id = node_id
-            cursor_x += step_gap_x
+            prev_node_ids = [node_id]
+            cursor_x += GAP_X
 
         # --- manual step ---
         elif "manual" in step:
@@ -984,7 +1251,7 @@ def _yaml_to_layout_data(yaml_str: str) -> dict:
             node = {
                 "id": node_id,
                 "x": cursor_x,
-                "y": base_y,
+                "y": BASE_Y,
                 "type": "manual",
                 "tag": "manual",
                 "name": "手动注入",
@@ -997,11 +1264,11 @@ def _yaml_to_layout_data(yaml_str: str) -> dict:
                 "source": "",
             }
             nodes.append(node)
-            if prev_node_id:
-                edges.append({"id": f"oe{eid}", "source": prev_node_id, "target": node_id})
+            for pid in prev_node_ids:
+                edges.append({"id": f"oe{eid}", "source": pid, "target": node_id})
                 eid += 1
-            prev_node_id = node_id
-            cursor_x += step_gap_x
+            prev_node_ids = [node_id]
+            cursor_x += GAP_X
 
     layout = {
         "nodes": nodes,

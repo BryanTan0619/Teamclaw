@@ -3,8 +3,8 @@
 
 # 锁定绝对路径：确保无论在哪启动，都能找到项目根目录
 export PROJECT_ROOT="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+export MINI_TIMEBOT_HEADLESS=0
 cd "$PROJECT_ROOT"
-
 echo "========== 1/4 环境检查与配置 =========="
 bash scripts/setup_env.sh
 if [ $? -ne 0 ]; then
@@ -34,6 +34,30 @@ fi
 
 echo ""
 echo "========== 4/4 启动服务 =========="
+
+# 清理旧的 Teamclaw 进程（按进程名匹配，pgrep/pkill 在 Linux 和 macOS 上均可用）
+_TC_SCRIPTS="scripts/launcher.py src/time.py oasis/server.py src/mainagent.py src/front.py"
+_TC_KILLED=0
+for _script in $_TC_SCRIPTS; do
+    _pids=$(pgrep -f "$_script" 2>/dev/null || true)
+    if [ -n "$_pids" ]; then
+        echo "🧹 发现旧进程 $_script (PID: $(echo $_pids | tr '\n' ' '))，正在清理..."
+        pkill -f "$_script" 2>/dev/null || true
+        _TC_KILLED=1
+    fi
+done
+if [ "$_TC_KILLED" = "1" ]; then
+    sleep 2
+    # 二次检查，强制杀残留
+    for _script in $_TC_SCRIPTS; do
+        if pgrep -f "$_script" >/dev/null 2>&1; then
+            echo "⚠️  $_script 仍在运行，强制终止..."
+            pkill -9 -f "$_script" 2>/dev/null || true
+        fi
+    done
+    sleep 1
+    echo "✅ 旧进程已清理"
+fi
 
 # 询问是否部署公网
 read -p "是否部署到公网？(y/N): " tunnel_answer

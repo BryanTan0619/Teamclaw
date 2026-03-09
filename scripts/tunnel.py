@@ -3,22 +3,18 @@
 """
 Cloudflare Tunnel 公网部署脚本
 - 自动检测平台（Linux/macOS + amd64/arm64）
-- 自动下载 cloudflared 到 bin/ 目录
-- 启动两条隧道：前端 Web UI + Bark 推送服务
-- 打印各自的公网地址
+- 提示用户手动安装 cloudflared
+- 启动隧道：前端 Web UI
+- 打印公网地址
 """
 
 import os
 import sys
 import re
-import stat
 import signal
 import platform
 import subprocess
-import urllib.request
-import tarfile
 import shutil
-import tempfile
 import threading
 from dotenv import load_dotenv
 
@@ -35,14 +31,13 @@ ENV_PATH = os.path.join(PROJECT_ROOT, "config", ".env")
 # ── 加载配置 ──────────────────────────────────────────────
 load_dotenv(dotenv_path=os.path.join(PROJECT_ROOT, "config", ".env"))
 PORT_FRONTEND = os.getenv("PORT_FRONTEND", "51209")
-PORT_BARK = os.getenv("PORT_BARK", "58010")
 
 # ── 全局进程引用 ──────────────────────────────────────────
 tunnel_procs = []
-tunnel_urls = {}  # {"frontend": "https://...", "bark": "https://..."}
+tunnel_urls = {}  # {"frontend": "https://..."}
 urls_lock = threading.Lock()
 all_tunnels_ready = threading.Event()
-expected_tunnels = 2
+expected_tunnels = 1
 
 
 def detect_platform():
@@ -70,41 +65,82 @@ def download_url(os_name, arch):
     if os_name == "linux":
         return f"https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-{arch}"
     elif os_name == "darwin":
-        # macOS 只提供 amd64 版本（arm64 通过 Rosetta 2 兼容）
         return "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-amd64.tgz"
 
 
-def download_cloudflared():
-    """下载 cloudflared 并放到 bin/ 目录"""
+def _download_cloudflared():
+    """自动下载 cloudflared 到 bin/ 目录，返回路径或 None"""
     os_name, arch = detect_platform()
     url = download_url(os_name, arch)
+    if not url:
+        return None
 
-    print(f"📥 正在下载 cloudflared ({os_name}/{arch})...")
-    print(f"   来源: {url}")
+    print(f"📥 正在自动下载 cloudflared ({os_name}/{arch})...")
+    print(f"   URL: {url}")
 
     try:
+        import urllib.request
         if os_name == "darwin":
-            # macOS: 下载 tgz 压缩包并解压
+            # macOS: 下载 tgz 并解压
             tgz_path = os.path.join(BIN_DIR, "cloudflared.tgz")
             urllib.request.urlretrieve(url, tgz_path)
+            import tarfile
             with tarfile.open(tgz_path, "r:gz") as tar:
-                tar.extractall(path=BIN_DIR)
+                tar.extract("cloudflared", BIN_DIR)
             os.remove(tgz_path)
         else:
             # Linux: 直接下载二进制
             urllib.request.urlretrieve(url, CLOUDFLARED_PATH)
 
-        # 添加可执行权限
-        os.chmod(CLOUDFLARED_PATH, os.stat(CLOUDFLARED_PATH).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-        print("✅ cloudflared 下载完成")
-
+        os.chmod(CLOUDFLARED_PATH, 0o755)
+        print(f"✅ cloudflared 已下载到: {CLOUDFLARED_PATH}")
+        return CLOUDFLARED_PATH
     except Exception as e:
-        print(f"❌ 下载失败: {e}")
-        sys.exit(1)
+        print(f"❌ 自动下载失败: {e}")
+        return None
+
+
+def get_cloudflared_install_guide(os_name, arch):
+    """返回 cloudflared 手动安装指南"""
+    url = download_url(os_name, arch)
+    
+    if os_name == "linux":
+        return f"""
+📥 手动安装 cloudflared (Linux {arch}):
+
+1. 下载二进制文件:
+   wget {url} -O cloudflared
+
+2. 添加执行权限:
+   chmod +x cloudflared
+
+3. 移动到系统路径或项目 bin/ 目录:
+   sudo mv cloudflared /usr/local/bin/  # 系统路径
+   或
+   mv cloudflared {BIN_DIR}/           # 项目路径
+"""
+    elif os_name == "darwin":
+        return f"""
+📥 手动安装 cloudflared (macOS):
+
+1. 下载压缩包:
+   curl -L {url} -o cloudflared.tgz
+
+2. 解压:
+   tar -xzf cloudflared.tgz
+
+3. 移动到系统路径或项目 bin/ 目录:
+   sudo mv cloudflared /usr/local/bin/  # 系统路径
+   或
+   mv cloudflared {BIN_DIR}/           # 项目路径
+
+4. 清理压缩包:
+   rm cloudflared.tgz
+"""
 
 
 def ensure_cloudflared():
-    """确保 cloudflared 可用"""
+    """确保 cloudflared 可用：优先查找已有 → 自动下载 → 失败则打印手动指南"""
     # 优先检查 bin/ 目录
     if os.path.isfile(CLOUDFLARED_PATH) and os.access(CLOUDFLARED_PATH, os.X_OK):
         print(f"✅ 已找到 cloudflared: {CLOUDFLARED_PATH}")
@@ -116,10 +152,19 @@ def ensure_cloudflared():
         print(f"✅ 已找到系统 cloudflared: {system_cf}")
         return system_cf
 
-    # 都没有，自动下载
-    print("⚠️  未找到 cloudflared，开始自动下载...")
-    download_cloudflared()
-    return CLOUDFLARED_PATH
+    # 尝试自动下载
+    path = _download_cloudflared()
+    if path:
+        return path
+
+    # 下载失败，打印手动安装指南
+    os_name, arch = detect_platform()
+    print("❌ 未找到且自动下载失败")
+    print("=" * 60)
+    print(get_cloudflared_install_guide(os_name, arch))
+    print("=" * 60)
+    print("\n💡 安装完成后，请重新运行此脚本")
+    sys.exit(1)
 
 
 def cleanup(signum=None, frame=None):
@@ -172,8 +217,6 @@ def write_domains_to_env():
     with urls_lock:
         if "frontend" in tunnel_urls:
             write_env_key("PUBLIC_DOMAIN", tunnel_urls["frontend"])
-        if "bark" in tunnel_urls:
-            write_env_key("BARK_PUBLIC_URL", tunnel_urls["bark"])
     print(f"📝 已将公网域名写入 {ENV_PATH}")
 
 
@@ -229,7 +272,6 @@ def start_tunnels():
     # Define tunnels: (name, local_port, env_key)
     tunnel_configs = [
         ("frontend", PORT_FRONTEND, "PUBLIC_DOMAIN"),
-        ("bark", PORT_BARK, "BARK_PUBLIC_URL"),
     ]
 
     # Start each tunnel in a background thread
@@ -253,9 +295,6 @@ def start_tunnels():
         with urls_lock:
             if "frontend" in tunnel_urls:
                 print(f"  🌍 前端地址: {tunnel_urls['frontend']}")
-            if "bark" in tunnel_urls:
-                print(f"  📱 Bark 推送地址: {tunnel_urls['bark']}")
-                print(f"     (请在 Bark App 中设置此地址作为 Server URL)")
         print("  按 Ctrl+C 关闭所有隧道")
         print("============================================")
         print()

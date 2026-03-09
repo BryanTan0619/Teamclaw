@@ -43,6 +43,7 @@ class Post:
     timestamp: float = field(default_factory=time.time)
     elapsed: float = 0.0    # seconds since discussion started
     voters: dict[str, str] = field(default_factory=dict)  # voter_name -> "up"/"down"
+    round_num: int = 0       # round number when this post was published
 
     def to_dict(self) -> dict:
         return {
@@ -51,12 +52,14 @@ class Post:
             "downvotes": self.downvotes, "timestamp": self.timestamp,
             "elapsed": round(self.elapsed, 2),
             "voters": self.voters,
+            "round_num": self.round_num,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "Post":
         d2 = dict(d)
         d2.setdefault("elapsed", 0.0)
+        d2.setdefault("round_num", 0)
         return cls(**d2)
 
 
@@ -181,6 +184,7 @@ class DiscussionForum:
                 content=content,
                 reply_to=reply_to,
                 elapsed=self.elapsed(),
+                round_num=self.current_round,
             )
             self.posts.append(post)
             return post
@@ -196,12 +200,30 @@ class DiscussionForum:
                 else:
                     post.downvotes += 1
 
-    async def browse(self, viewer: str | None = None, exclude_self: bool = False) -> list[Post]:
-        """Browse all posts. Optionally exclude the viewer's own posts."""
+    async def browse(
+        self,
+        viewer: str | None = None,
+        exclude_self: bool = False,
+        visible_authors: set[str] | None = None,
+        from_round: int | None = None,
+    ) -> list[Post]:
+        """Browse posts with optional visibility filtering.
+
+        Args:
+            viewer: Current viewer's name.
+            exclude_self: If True, exclude the viewer's own posts.
+            visible_authors: If set, only include posts by these authors (execute mode DAG).
+            from_round: If set, only include posts from this round onward (execute mode non-DAG).
+        """
         async with self._lock:
+            result = list(self.posts)
             if exclude_self and viewer:
-                return [p for p in self.posts if p.author != viewer]
-            return list(self.posts)
+                result = [p for p in result if p.author != viewer]
+            if visible_authors is not None:
+                result = [p for p in result if p.author in visible_authors]
+            if from_round is not None:
+                result = [p for p in result if p.round_num >= from_round]
+            return result
 
     async def get_top_posts(self, n: int = 3) -> list[Post]:
         """Get the top N posts ranked by net upvotes."""
