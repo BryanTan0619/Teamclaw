@@ -233,8 +233,7 @@ AI_MODEL_TG=gemini-2.0-flash
 
 
 def detect_openclaw_api_url():
-    """确保 ChatCompletions 已开启，然后通过 gateway.port 自动探测 OPENCLAW_API_URL"""
-    _enable_openclaw_chat_completions()
+    """通过 gateway.port 自动探测 OPENCLAW_API_URL"""
     try:
         result = subprocess.run(
             ["openclaw", "config", "get", "gateway.port"],

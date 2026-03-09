@@ -166,24 +166,31 @@ class DiscussionEngine:
                     ext_id = uuid.uuid4().hex[:8]
                     print(f"  [OASIS] 🆕 #new: '{full_name}' → new external session '{ext_id}'")
                 cfg = ext_configs.get(full_name, {})
-                if not cfg.get("api_url"):
+                is_openclaw = first.lower() == "openclaw"
+                if not cfg.get("api_url") and not is_openclaw:
                     print(f"  [OASIS] ⚠️ External expert '{full_name}' missing 'api_url' in YAML, skipping.")
                     continue
+                # OpenClaw agents can work via CLI without api_url
+                api_url = cfg.get("api_url", "") or ""
+                model_str = cfg.get("model", "gpt-3.5-turbo")
                 config = self._lookup_by_tag(first, user_id)
                 expert_name = config["name"] if config else first
                 persona = config.get("persona", "") if config else ""
                 expert = ExternalExpert(
                     name=expert_name,
                     ext_id=ext_id,
-                    api_url=cfg["api_url"],
+                    api_url=api_url,
                     api_key=cfg.get("api_key", "") or os.getenv("OPENCLAW_GATEWAY_TOKEN", ""),
-                    model=cfg.get("model", "gpt-3.5-turbo"),
+                    model=model_str,
                     persona=persona,
                     timeout=bot_timeout,
                     tag=first,
                     extra_headers=cfg.get("headers"),
                 )
-                print(f"  [OASIS] 🌐 External expert: {expert.name} → {cfg['api_url']}")
+                if is_openclaw and not api_url:
+                    print(f"  [OASIS] 🦞 OpenClaw agent: {expert.name} (CLI only, no api_url)")
+                else:
+                    print(f"  [OASIS] 🌐 External expert: {expert.name} → {api_url}")
             elif sid.startswith("temp#"):
                 # e.g. "creative#temp#1" → ExpertAgent with explicit temp_id
                 config = self._lookup_by_tag(first, user_id)

@@ -704,11 +704,12 @@ class ExternalExpert:
             self._openclaw_bin = None
 
         # Normalize api_url: strip trailing slash, build full URL
-        api_url = api_url.rstrip("/")
-        if not api_url.endswith("/v1/chat/completions"):
-            if not api_url.endswith("/v1"):
-                api_url += "/v1"
-            api_url += "/chat/completions"
+        if api_url:
+            api_url = api_url.rstrip("/")
+            if not api_url.endswith("/v1/chat/completions"):
+                if not api_url.endswith("/v1"):
+                    api_url += "/v1"
+                api_url += "/chat/completions"
         self._api_url = api_url
         self._api_key = api_key
 
@@ -825,6 +826,8 @@ class ExternalExpert:
                 # Fall through to HTTP API below
 
         # ── HTTP API call (primary for non-OpenClaw, fallback for OpenClaw) ──
+        if not self._api_url:
+            raise RuntimeError(f"No api_url configured for {self.name} and CLI unavailable/failed")
         body = {
             "model": self.model,
             "messages": messages,
