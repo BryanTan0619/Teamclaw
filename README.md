@@ -53,7 +53,7 @@ plan:
 
 | Dimension | Control | Description |
 |-----------|---------|-------------|
-| **Who participates** | `expert_tags` | Select from 10+ built-in experts + user-defined custom expert pool |
+| **Who participates** | `expert_tags` | Select from 78 built-in experts (10 core + 68 agency) + user-defined custom expert pool |
 | **How they discuss** | `schedule_yaml` | 4 step types freely combined (sequential / parallel / all / manual injection) |
 | **How deep** | `max_rounds` + `use_bot_session` | Control round depth; choose stateful (memory + tools) or stateless (lightweight & fast) |
 
@@ -101,6 +101,24 @@ plan:
 | 📊 Revenue Planner | `revenue_planner` | 0.6 | Revenue maximization strategy |
 | 🚀 Entrepreneur | `entrepreneur` | 0.8 | 0-to-1 hands-on perspective |
 | 🧑 Common Person | `common_person` | 0.7 | Down-to-earth common sense feedback |
+
+**68 Agency Experts (Professional Prompt Library):**
+
+Integrated from [agency-agents](https://github.com/msitarzewski/agency-agents), covering 9 professional domains with deeply crafted prompts:
+
+| Category | Count | Example Experts |
+|----------|-------|----------------|
+| 🎨 Design | 8 | UX Architect, UI Designer, Brand Guardian, Image Prompt Engineer |
+| 🛠 Engineering | 11 | Senior Developer, Backend Architect, Frontend Developer, DevOps Automator, Security Engineer |
+| 📢 Marketing | 11 | Content Creator, Growth Hacker, Social Media Strategist, TikTok/WeChat/Xiaohongshu Specialists |
+| 📦 Product | 4 | Sprint Prioritizer, Trend Researcher, Feedback Synthesizer |
+| 📋 Project Management | 5 | Senior PM, Studio Producer, Experiment Tracker |
+| 🥽 Spatial Computing | 6 | VisionOS Engineer, XR Developer, Metal Engineer |
+| 🔬 Specialized | 9 | Agents Orchestrator, Developer Advocate, Data Analytics Reporter |
+| 🛡 Support | 6 | Finance Tracker, Legal Compliance, Infrastructure Maintainer |
+| 🧪 Testing | 8 | API Tester, Performance Benchmarker, Accessibility Auditor |
+
+These expert prompts are loaded automatically at startup and can be selected by tag in OASIS schedules, providing professional-grade expertise across the full product lifecycle.
 
 **User-Defined Custom Experts:** Each user can create private experts (name, tag, persona, temperature) through the Agent, mixed with public experts, isolated per user.
 
@@ -433,6 +451,17 @@ TeamClaw/
 │   ├── telegram_whitelist.json    # Telegram bot whitelist
 │   ├── prompts/                   # System prompts + expert configs
 │   │   ├── oasis_experts.json     # 10 public expert definitions
+│   │   ├── agency_experts.json    # 68 agency expert index
+│   │   ├── agency_agents/         # 68 expert prompts (9 categories)
+│   │   │   ├── design/            # 8 design experts
+│   │   │   ├── engineering/       # 11 engineering experts
+│   │   │   ├── marketing/         # 11 marketing experts
+│   │   │   ├── product/           # 4 product experts
+│   │   │   ├── project-management/ # 5 PM experts
+│   │   │   ├── spatial-computing/ # 6 spatial computing experts
+│   │   │   ├── specialized/       # 9 specialized experts
+│   │   │   ├── support/           # 6 support experts
+│   │   │   └── testing/           # 8 testing experts
 │   │   ├── oasis_expert_discuss.txt  # Expert discussion prompt template
 │   │   └── oasis_summary.txt     # Conclusion generation prompt template
 │   ├── schedules/                 # YAML schedule examples
@@ -531,7 +560,7 @@ plan:
 
 | 维度 | 控制方式 | 说明 |
 |------|----------|------|
-| **谁参与** | `expert_tags` | 从 10+ 内置专家 + 用户自定义专家池中选人 |
+| **谁参与** | `expert_tags` | 从 78 位内置专家（10 核心 + 68 agency）+ 用户自定义专家池中选人 |
 | **怎么讨论** | `schedule_yaml` | 4 种步骤类型自由组合（顺序 / 并行 / 全员 / 手动注入） |
 | **多深入** | `max_rounds` + `use_bot_session` | 控制轮次深度，可选有状态（记忆+工具）或无状态（轻量快速） |
 
@@ -579,6 +608,24 @@ plan:
 | 📊 收益规划者 | `revenue_planner` | 0.6 | 收益最大化策略 |
 | 🚀 创新企业家 | `entrepreneur` | 0.8 | 从 0 到 1 的实战视角 |
 | 🧑 普通人 | `common_person` | 0.7 | 接地气的常识反馈 |
+
+**68 位 Agency 专业专家（Prompt 工程库）：**
+
+集成自 [agency-agents](https://github.com/msitarzewski/agency-agents)，涵盖 9 大专业领域，每位专家配备深度打磨的 Prompt：
+
+| 分类 | 数量 | 代表专家 |
+|------|------|----------|
+| 🎨 设计 | 8 | UX 架构师、UI 设计师、品牌守护者、图像 Prompt 工程师 |
+| 🛠 工程 | 11 | 高级开发者、后端架构师、前端开发者、DevOps 自动化师、安全工程师 |
+| 📢 营销 | 11 | 内容创作者、增长黑客、社交媒体策略师、抖音/微信/小红书专家 |
+| 📦 产品 | 4 | 迭代优先级规划师、趋势研究员、反馈整合师 |
+| 📋 项目管理 | 5 | 高级项目经理、工作室制片人、实验追踪器 |
+| 🥽 空间计算 | 6 | VisionOS 工程师、XR 开发者、Metal 工程师 |
+| 🔬 专项 | 9 | Agent 编排器、开发者布道师、数据分析报告员 |
+| 🛡 支持 | 6 | 财务追踪、法律合规、基础设施维护 |
+| 🧪 测试 | 8 | API 测试员、性能基准测试、无障碍审计师 |
+
+这些专家 Prompt 在启动时自动加载，可在 OASIS 调度中通过 tag 选用，为产品全生命周期提供专业级视角。
 
 **用户自定义专家**：每个用户可通过 Agent 创建私有专家（定义名称、tag、persona、温度），与公共专家混合使用，按用户隔离。
 
@@ -1004,6 +1051,17 @@ TeamClaw/
 │   ├── telegram_whitelist.json    # Telegram 机器人白名单
 │   ├── prompts/                   # 系统提示词 + 专家配置
 │   │   ├── oasis_experts.json     # 10 位公共专家定义
+│   │   ├── agency_experts.json    # 68 位 agency 专家索引
+│   │   ├── agency_agents/         # 68 位专家 prompt（9 大分类）
+│   │   │   ├── design/            # 8 位设计专家
+│   │   │   ├── engineering/       # 11 位工程专家
+│   │   │   ├── marketing/         # 11 位营销专家
+│   │   │   ├── product/           # 4 位产品专家
+│   │   │   ├── project-management/ # 5 位项目管理专家
+│   │   │   ├── spatial-computing/ # 6 位空间计算专家
+│   │   │   ├── specialized/       # 9 位专项专家
+│   │   │   ├── support/           # 6 位支持专家
+│   │   │   └── testing/           # 8 位测试专家
 │   │   ├── oasis_expert_discuss.txt  # 专家讨论 prompt 模板
 │   │   └── oasis_summary.txt     # 结论生成 prompt 模板
 │   ├── schedules/                 # YAML 调度示例
