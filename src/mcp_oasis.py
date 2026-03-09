@@ -70,6 +70,7 @@ async def list_oasis_experts(username: str = "") -> str:
                 return "📭 暂无可用专家"
 
             public = [e for e in experts if e.get("source") == "public"]
+            agency = [e for e in experts if e.get("source") == "agency"]
             custom = [e for e in experts if e.get("source") == "custom"]
 
             lines = [f"🏛️ OASIS 可用专家 - 共 {len(experts)} 位\n"]
@@ -79,6 +80,30 @@ async def list_oasis_experts(username: str = "") -> str:
                 for e in public:
                     persona_preview = e["persona"][:60] + "..." if len(e["persona"]) > 60 else e["persona"]
                     lines.append(f"  • {e['name']} (tag: \"{e['tag']}\") — {persona_preview}")
+
+            if agency:
+                lines.append(f"\n🌐 Agency 专业专家库 ({len(agency)} 位):")
+                # 按分类分组展示
+                from collections import defaultdict
+                by_cat = defaultdict(list)
+                for e in agency:
+                    cat = e.get("category", "other")
+                    by_cat[cat].append(e)
+                cat_labels = {
+                    "design": "🎨 设计", "engineering": "⚙️ 工程",
+                    "marketing": "📢 营销", "product": "📦 产品",
+                    "project-management": "📋 项目管理",
+                    "spatial-computing": "🥽 空间计算",
+                    "specialized": "🔬 专项", "support": "🛠️ 支持",
+                    "testing": "🧪 测试",
+                }
+                for cat, items in sorted(by_cat.items()):
+                    label = cat_labels.get(cat, cat)
+                    lines.append(f"  {label} ({len(items)} 位):")
+                    for e in items:
+                        desc = e.get("description", "")
+                        desc_preview = desc[:50] + "..." if len(desc) > 50 else desc
+                        lines.append(f"    • {e['name']} (tag: \"{e['tag']}\") — {desc_preview}")
 
             if custom:
                 lines.append(f"\n🔧 自定义专家 ({len(custom)} 位):")

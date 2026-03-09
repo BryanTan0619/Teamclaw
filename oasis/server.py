@@ -463,20 +463,30 @@ async def get_conclusion(topic_id: str, user_id: str = Query(...), timeout: int 
 
 @app.get("/experts")
 async def list_experts(user_id: str = ""):
-    """List all available expert agents (public + user custom)."""
+    """List all available expert agents (public + agency + user custom)."""
     from oasis.experts import get_all_experts
     configs = get_all_experts(user_id or None)
-    return {
-        "experts": [
-            {
-                "name": c["name"],
-                "tag": c["tag"],
-                "persona": c["persona"],
-                "source": c.get("source", "public"),
-            }
-            for c in configs
-        ]
-    }
+    result = []
+    for c in configs:
+        persona_raw = c["persona"]
+        # Agency 专家的 persona 是完整 md 正文，过长时截断为预览
+        if len(persona_raw) > 300:
+            persona_preview = persona_raw[:300] + "..."
+        else:
+            persona_preview = persona_raw
+        entry = {
+            "name": c["name"],
+            "tag": c["tag"],
+            "persona": persona_preview,
+            "source": c.get("source", "public"),
+        }
+        # 为 agency 专家附加分类和描述
+        if c.get("category"):
+            entry["category"] = c["category"]
+        if c.get("description"):
+            entry["description"] = c["description"]
+        result.append(entry)
+    return {"experts": result}
 
 
 @app.get("/sessions/oasis")

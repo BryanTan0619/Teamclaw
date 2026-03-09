@@ -56,8 +56,31 @@ from oasis.forum import DiscussionForum
 # --- 加载 prompt 和专家配置（模块级别，导入时执行一次） ---
 _data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 _prompts_dir = os.path.join(_data_dir, "prompts")
+_agency_prompts_dir = os.path.join(_prompts_dir, "agency_agents")
 
-# 加载公共专家配置
+
+def _load_prompt_file(prompt_file: str) -> str:
+    """Load the full prompt content from an agency_agents .md file.
+
+    Strips YAML frontmatter (--- ... ---) and returns the body text.
+    Returns empty string if file not found.
+    """
+    import re as _re
+    fpath = os.path.join(_agency_prompts_dir, prompt_file)
+    if not os.path.isfile(fpath):
+        return ""
+    try:
+        with open(fpath, "r", encoding="utf-8") as f:
+            content = f.read()
+        # Strip YAML frontmatter
+        fm_match = _re.match(r'^---\s*\n.*?\n---\s*\n', content, _re.DOTALL)
+        body = content[fm_match.end():] if fm_match else content
+        return body.strip()
+    except Exception:
+        return ""
+
+
+# 加载公共专家配置（原始简版）
 _experts_json_path = os.path.join(_prompts_dir, "oasis_experts.json")
 try:
     with open(_experts_json_path, "r", encoding="utf-8") as f:
@@ -71,6 +94,26 @@ except FileNotFoundError:
         {"name": "数据分析师", "tag": "data", "persona": "你是一个数据驱动的分析师，只相信数据和事实。你用数字、案例和逻辑推导来支撑你的观点。", "temperature": 0.5},
         {"name": "综合顾问", "tag": "synthesis", "persona": "你善于综合不同观点，寻找平衡方案，关注实际可操作性。你会识别各方共识，提出兼顾多方利益的务实建议。", "temperature": 0.5},
     ]
+
+# 加载 agency-agents 丰富版专家 prompt 库
+_agency_json_path = os.path.join(_prompts_dir, "agency_experts.json")
+AGENCY_EXPERT_CONFIGS: list[dict] = []
+try:
+    with open(_agency_json_path, "r", encoding="utf-8") as f:
+        _raw_agency = json.load(f)
+    # 为每个 agency 专家加载完整 prompt 并设置 persona
+    _existing_tags = {c["tag"] for c in EXPERT_CONFIGS}
+    for item in _raw_agency:
+        if item["tag"] in _existing_tags:
+            continue  # 跳过与原始专家 tag 冲突的（不应出现）
+        prompt_body = _load_prompt_file(item["prompt_file"])
+        if not prompt_body:
+            continue  # 跳过加载失败的
+        item["persona"] = prompt_body  # 用完整 md 正文作为 persona
+        AGENCY_EXPERT_CONFIGS.append(item)
+    print(f"[prompts] ✅ oasis 已加载 agency_experts.json ({len(AGENCY_EXPERT_CONFIGS)} 位 Agency 专家)")
+except FileNotFoundError:
+    print(f"[prompts] ⚠️ 未找到 {_agency_json_path}，Agency 专家库未启用")
 
 
 # ======================================================================
@@ -114,12 +157,17 @@ def _validate_expert(data: dict) -> dict:
         raise ValueError("专家 tag 不能为空")
     if not persona:
         raise ValueError("专家 persona 不能为空")
-    return {
+    result = {
         "name": name,
         "tag": tag,
         "persona": persona,
         "temperature": float(data.get("temperature", 0.7)),
     }
+    # 保留可选扩展字段
+    for key in ("category", "description", "prompt_file"):
+        if data.get(key):
+            result[key] = data[key]
+    return result
 
 
 def add_user_expert(user_id: str, data: dict) -> dict:
@@ -130,6 +178,8 @@ def add_user_expert(user_id: str, data: dict) -> dict:
         raise ValueError(f"用户已有 tag=\"{expert['tag']}\" 的专家，请换一个 tag 或使用更新功能")
     if any(e["tag"] == expert["tag"] for e in EXPERT_CONFIGS):
         raise ValueError(f"tag=\"{expert['tag']}\" 与公共专家冲突，请换一个 tag")
+    if any(e["tag"] == expert["tag"] for e in AGENCY_EXPERT_CONFIGS):
+        raise ValueError(f"tag=\"{expert['tag']}\" 与 Agency 专家库冲突，请换一个 tag")
     experts.append(expert)
     _save_user_experts(user_id, experts)
     return expert
@@ -159,10 +209,13 @@ def delete_user_expert(user_id: str, tag: str) -> dict:
 
 
 def get_all_experts(user_id: str | None = None) -> list[dict]:
-    """Return public experts + user's custom experts (marked with source)."""
+    """Return public experts + agency experts + user's custom experts (marked with source)."""
     result = [
         {**c, "source": "public"} for c in EXPERT_CONFIGS
     ]
+    result.extend(
+        {**c, "source": "agency"} for c in AGENCY_EXPERT_CONFIGS
+    )
     if user_id:
         result.extend(
             {**c, "source": "custom"} for c in load_user_experts(user_id)
@@ -212,7 +265,16 @@ def _build_discuss_prompt(
         )
 
     # --- Build system part (identity + behavior) ---
-    identity = f"你是论坛专家「{expert_name}」。{persona}" if persona else ""
+    # 判断是否是丰富的 agency 专家 prompt（含 markdown 标题）
+    _is_rich_persona = persona and ("## " in persona or "# " in persona)
+    if _is_rich_persona:
+        # Agency 专家：完整 prompt 已包含身份/职责/规则等，直接使用
+        identity = (
+            f"你在 OASIS 论坛中的显示名称是「{expert_name}」。\n\n"
+            f"以下是你的完整身份与行为指南：\n\n{persona}"
+        )
+    else:
+        identity = f"你是论坛专家「{expert_name}」。{persona}" if persona else ""
     sys_parts = [p for p in [
         identity,
         "在接下来的讨论中，你将收到论坛的新增内容，需要以 JSON 格式回复你的观点和投票。",
@@ -243,6 +305,20 @@ def _build_discuss_prompt(
         return system_prompt, user_prompt
     else:
         return f"{system_prompt}\n\n{user_prompt}"
+
+
+def _build_identity_prompt(expert_name: str, persona: str) -> str:
+    """Build identity text for execute mode. Handles both short and rich personas."""
+    if not persona:
+        return ""
+    _is_rich = "## " in persona or "# " in persona
+    if _is_rich:
+        return (
+            f"你在 OASIS 论坛中的显示名称是「{expert_name}」。\n\n"
+            f"以下是你的完整身份与行为指南：\n\n{persona}\n\n"
+        )
+    else:
+        return f"你是「{expert_name}」。{persona}\n\n"
 
 
 def _format_posts(posts) -> str:
@@ -342,7 +418,7 @@ class ExpertAgent:
 
         if not discussion:
             # ── Execute mode: just run the task, no discussion format ──
-            task_prompt = f"你是「{self.title}」。{self.persona}\n\n" if self.persona else ""
+            task_prompt = _build_identity_prompt(self.title, self.persona)
             task_prompt += f"任务主题: {forum.question}\n"
             if instruction:
                 task_prompt += f"\n执行指令: {instruction}\n"
@@ -474,7 +550,7 @@ class SessionExpert:
                 # First call
                 task_parts = []
                 if self.is_oasis and self.persona:
-                    messages.append({"role": "system", "content": f"你是「{self.title}」。{self.persona}"})
+                    messages.append({"role": "system", "content": _build_identity_prompt(self.title, self.persona).strip()})
                 task_parts.append(f"任务主题: {forum.question}")
                 if instruction:
                     task_parts.append(f"\n执行指令: {instruction}")
@@ -974,7 +1050,7 @@ class ExternalExpert:
             messages: list[dict] = []
             if not self._initialized:
                 if self.persona:
-                    messages.append({"role": "system", "content": f"你是「{self.title}」。{self.persona}"})
+                    messages.append({"role": "system", "content": _build_identity_prompt(self.title, self.persona).strip()})
                 task_parts = [f"任务主题: {forum.question}"]
                 if instruction:
                     task_parts.append(f"\n执行指令: {instruction}")
