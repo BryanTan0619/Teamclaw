@@ -110,35 +110,100 @@ async function orchLoadExperts() {
 function orchRenderExpertSidebar() {
     const pubList = document.getElementById('orch-expert-list-public');
     const custList = document.getElementById('orch-expert-list-custom');
+    const agencyCats = document.getElementById('orch-agency-categories');
     pubList.innerHTML = '';
     custList.innerHTML = '';
+    if (agencyCats) agencyCats.innerHTML = '';
+
+    // 分类标签映射
+    const catLabels = {
+        'design': {icon: '🎨', name: '设计'},
+        'engineering': {icon: '⚙️', name: '工程'},
+        'marketing': {icon: '📢', name: '营销'},
+        'product': {icon: '📦', name: '产品'},
+        'project-management': {icon: '📋', name: '项目管理'},
+        'spatial-computing': {icon: '🥽', name: '空间计算'},
+        'specialized': {icon: '🔬', name: '专项'},
+        'support': {icon: '🛡️', name: '支持'},
+        'testing': {icon: '🧪', name: '测试'},
+    };
+
+    // 收集 agency 专家按 category 分组
+    const agencyByCategory = {};
 
     orch.experts.forEach(exp => {
-        const card = document.createElement('div');
-        card.className = 'orch-expert-card';
-        card.draggable = true;
         const isCustom = exp.source === 'custom';
-        card.innerHTML = `<span class="orch-emoji">${exp.emoji}</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(exp.name)}">${escapeHtml(exp.name)}</div><div class="orch-tag">${escapeHtml(exp.tag)}</div></div><span class="orch-temp">${exp.temperature||''}</span>${isCustom ? '<button class="orch-expert-del-btn" title="' + t('orch_ctx_delete') + '" style="font-size:10px;background:none;border:none;cursor:pointer;color:#dc2626;padding:0 2px;margin-left:2px;">✕</button>' : ''}`;
-        orchBindCardEvents(card, {type:'expert', ...exp});
+        const isAgency = exp.source === 'agency';
+
         if (isCustom) {
-            card.querySelector('.orch-expert-del-btn').addEventListener('click', async (ev) => {
-                ev.stopPropagation();
-                if (!confirm(t('orch_confirm_del_expert', {name: exp.name}))) return;
-                try {
-                    await fetch('/proxy_visual/experts/custom/' + encodeURIComponent(exp.tag), { method: 'DELETE' });
-                    orchToast(t('orch_toast_expert_deleted', {name: exp.name}));
-                    orchLoadExperts();
-                } catch(e) { orchToast(t('orch_toast_expert_del_fail')); }
-            });
+            const card = _orchCreateExpertCard(exp, true);
             custList.appendChild(card);
+        } else if (isAgency && exp.category) {
+            if (!agencyByCategory[exp.category]) agencyByCategory[exp.category] = [];
+            agencyByCategory[exp.category].push(exp);
         } else {
+            // 公共专家 (source === 'public')
+            const card = _orchCreateExpertCard(exp, false);
             pubList.appendChild(card);
         }
     });
 
+    // 渲染 Agency 分类折叠
+    if (agencyCats) {
+        const sortedCats = Object.keys(agencyByCategory).sort();
+        sortedCats.forEach(cat => {
+            const items = agencyByCategory[cat];
+            const info = catLabels[cat] || {icon: '📂', name: cat};
+            const wrapper = document.createElement('div');
+            wrapper.className = 'orch-agency-cat-group';
+
+            const header = document.createElement('div');
+            header.className = 'orch-agency-cat-header';
+            header.innerHTML = `<span class="cat-icon">${info.icon}</span><span class="cat-name">${info.name}</span><span class="cat-count">${items.length}</span><span class="cat-arrow">▶</span>`;
+
+            const list = document.createElement('div');
+            list.className = 'orch-agency-cat-list';
+
+            items.forEach(exp => {
+                const card = _orchCreateExpertCard(exp, false);
+                list.appendChild(card);
+            });
+
+            header.addEventListener('click', () => {
+                const isExpanded = header.classList.toggle('expanded');
+                list.classList.toggle('expanded', isExpanded);
+            });
+
+            wrapper.appendChild(header);
+            wrapper.appendChild(list);
+            agencyCats.appendChild(wrapper);
+        });
+    }
+
     if (!custList.children.length) {
         custList.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#d1d5db;text-align:center;">' + t('orch_no_custom') + '</div>';
     }
+}
+
+// 创建专家卡片的辅助函数
+function _orchCreateExpertCard(exp, isCustom) {
+    const card = document.createElement('div');
+    card.className = 'orch-expert-card';
+    card.draggable = true;
+    card.innerHTML = `<span class="orch-emoji">${exp.emoji}</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(exp.name)}">${escapeHtml(exp.name)}</div><div class="orch-tag">${escapeHtml(exp.tag)}</div></div><span class="orch-temp">${exp.temperature||''}</span>${isCustom ? '<button class="orch-expert-del-btn" title="' + t('orch_ctx_delete') + '" style="font-size:10px;background:none;border:none;cursor:pointer;color:#dc2626;padding:0 2px;margin-left:2px;">✕</button>' : ''}`;
+    orchBindCardEvents(card, {type:'expert', ...exp});
+    if (isCustom) {
+        card.querySelector('.orch-expert-del-btn').addEventListener('click', async (ev) => {
+            ev.stopPropagation();
+            if (!confirm(t('orch_confirm_del_expert', {name: exp.name}))) return;
+            try {
+                await fetch('/proxy_visual/experts/custom/' + encodeURIComponent(exp.tag), { method: 'DELETE' });
+                orchToast(t('orch_toast_expert_deleted', {name: exp.name}));
+                orchLoadExperts();
+            } catch(e) { orchToast(t('orch_toast_expert_del_fail')); }
+        });
+    }
+    return card;
 }
 
 // ── Load session agents ──

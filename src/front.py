@@ -969,9 +969,20 @@ def proxy_visual_experts():
     if not all_experts:
         all_experts = [{**e, "source": "public"} for e in _VIS_EXPERTS]
 
+    # Agency 专家按 category 分配不同的 emoji
+    _AGENCY_CAT_EMOJI = {
+        "design": "🎨", "engineering": "⚙️", "marketing": "📢",
+        "product": "📦", "project-management": "📋",
+        "spatial-computing": "🥽", "specialized": "🔬",
+        "support": "🛡️", "testing": "🧪",
+    }
+
     result = []
     for e in all_experts:
-        emoji = _VIS_TAG_EMOJI.get(e.get("tag", ""), "⭐")
+        emoji = _VIS_TAG_EMOJI.get(e.get("tag", ""), "")
+        if not emoji:
+            # Agency 专家: 根据 category 分配 emoji
+            emoji = _AGENCY_CAT_EMOJI.get(e.get("category", ""), "⭐")
         if e.get("source") == "custom":
             emoji = "🛠️"
         result.append({**e, "emoji": emoji})
