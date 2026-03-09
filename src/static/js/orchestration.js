@@ -108,15 +108,14 @@ async function orchLoadExperts() {
 }
 
 function orchRenderExpertSidebar() {
-    const pubList = document.getElementById('orch-expert-list-public');
     const custList = document.getElementById('orch-expert-list-custom');
     const agencyCats = document.getElementById('orch-agency-categories');
-    pubList.innerHTML = '';
     custList.innerHTML = '';
     if (agencyCats) agencyCats.innerHTML = '';
 
-    // 分类标签映射
+    // 分类标签映射（公共专家也作为一个分类）
     const catLabels = {
+        '_public': {icon: '🌟', name: '公共专家'},
         'design': {icon: '🎨', name: '设计'},
         'engineering': {icon: '⚙️', name: '工程'},
         'marketing': {icon: '📢', name: '营销'},
@@ -128,41 +127,42 @@ function orchRenderExpertSidebar() {
         'testing': {icon: '🧪', name: '测试'},
     };
 
-    // 收集 agency 专家按 category 分组
-    const agencyByCategory = {};
+    // 所有非自定义专家都按 category 分组（公共专家用 _public 分类）
+    const expertsByCategory = {};
 
     orch.experts.forEach(exp => {
         const isCustom = exp.source === 'custom';
-        const isAgency = exp.source === 'agency';
-
         if (isCustom) {
             const card = _orchCreateExpertCard(exp, true);
             custList.appendChild(card);
-        } else if (isAgency && exp.category) {
-            if (!agencyByCategory[exp.category]) agencyByCategory[exp.category] = [];
-            agencyByCategory[exp.category].push(exp);
         } else {
-            // 公共专家 (source === 'public')
-            const card = _orchCreateExpertCard(exp, false);
-            pubList.appendChild(card);
+            const cat = (exp.source === 'agency' && exp.category) ? exp.category : '_public';
+            if (!expertsByCategory[cat]) expertsByCategory[cat] = [];
+            expertsByCategory[cat].push(exp);
         }
     });
 
-    // 渲染 Agency 分类折叠
+    // 渲染所有分类折叠（公共专家 _public 排在最前面且默认展开）
     if (agencyCats) {
-        const sortedCats = Object.keys(agencyByCategory).sort();
+        // 排序: _public 排首位，其余按字母排序
+        const sortedCats = Object.keys(expertsByCategory).sort((a, b) => {
+            if (a === '_public') return -1;
+            if (b === '_public') return 1;
+            return a.localeCompare(b);
+        });
         sortedCats.forEach(cat => {
-            const items = agencyByCategory[cat];
+            const items = expertsByCategory[cat];
             const info = catLabels[cat] || {icon: '📂', name: cat};
+            const isPublic = (cat === '_public');
             const wrapper = document.createElement('div');
             wrapper.className = 'orch-agency-cat-group';
 
             const header = document.createElement('div');
-            header.className = 'orch-agency-cat-header';
+            header.className = 'orch-agency-cat-header' + (isPublic ? ' expanded' : '');
             header.innerHTML = `<span class="cat-icon">${info.icon}</span><span class="cat-name">${info.name}</span><span class="cat-count">${items.length}</span><span class="cat-arrow">▶</span>`;
 
             const list = document.createElement('div');
-            list.className = 'orch-agency-cat-list';
+            list.className = 'orch-agency-cat-list' + (isPublic ? ' expanded' : '');
 
             items.forEach(exp => {
                 const card = _orchCreateExpertCard(exp, false);

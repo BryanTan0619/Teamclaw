@@ -83,6 +83,9 @@
             </div>
         </div>
 
+        <!-- Divider: 会话侧栏 ↔ 聊天区 -->
+        <div class="session-divider" id="session-divider"></div>
+
         <!-- ===== 左侧：聊天区 ===== -->
         <div class="chat-main h-screen flex flex-col bg-white border-x border-gray-200 shadow-2xl">
             <!-- Page Switch Tab Bar -->
@@ -297,12 +300,11 @@
                         </div>
                     </div>
                     <div class="orch-sidebar-grid">
-                        <!-- Top-left: Public experts + Agency categories -->
+                        <!-- Top-left: All experts by categories -->
                         <div class="orch-sidebar-grid-cell">
                             <div class="orch-sidebar-grid-cell-header">
                                 <span data-i18n="orch_preset_experts">📚 预设专家</span>
                             </div>
-                            <div class="orch-expert-list" id="orch-expert-list-public"></div>
                             <div id="orch-agency-categories" class="orch-agency-categories"></div>
                         </div>
                         <!-- Top-right: Custom experts -->
@@ -337,6 +339,9 @@
                         <b data-i18n="orch_shortcuts_title">快捷操作：</b><span data-i18n="orch_shortcuts_body">拖入专家到画布 · 连接端口=工作流 · Ctrl+G=分组 · 双击快速添加</span>
                     </div>
                 </div>
+
+                <!-- Divider: 左侧专家池 ↔ 画布 -->
+                <div class="orch-divider" id="orch-divider-left"></div>
 
                 <!-- Center: Canvas -->
                 <div class="orch-canvas-wrapper">
@@ -388,6 +393,9 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Divider: 画布 ↔ 右侧设置面板 -->
+                <div class="orch-divider" id="orch-divider-right"></div>
 
                 <!-- Right: Settings + YAML -->
                 <div class="orch-right-panel">

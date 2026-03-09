@@ -190,3 +190,78 @@ if (inputEl && isTouchDevice) {
         }, 200);
     });
 }
+
+// ============================================================
+// 通用可拖动分割线 — 让用户自由调整各侧栏/面板宽度
+// ============================================================
+(function initDividerResize() {
+    // 配置表: { dividerId, leftSelector, rightSelector (optional), minLeft, minRight, direction }
+    const dividers = [
+        // 编排页：左侧专家池 ↔ 画布
+        { id: 'orch-divider-left', leftSel: '.orch-sidebar', rightSel: null, min: 200, max: 600 },
+        // 编排页：画布 ↔ 右侧设置面板
+        { id: 'orch-divider-right', rightSel: '.orch-right-panel', leftSel: null, min: 180, max: 500 },
+        // 主页面：会话侧栏 ↔ 聊天区
+        { id: 'session-divider', leftSel: '#session-sidebar', rightSel: null, min: 160, max: 450 },
+        // 主页面：聊天区 ↔ OASIS 讨论面板
+        { id: 'oasis-divider', rightSel: '#oasis-panel', leftSel: null, min: 280, max: 700 },
+    ];
+
+    dividers.forEach(cfg => {
+        const divEl = document.getElementById(cfg.id);
+        if (!divEl) return;
+
+        let startX = 0, startW = 0, target = null, isRight = false;
+
+        divEl.addEventListener('mousedown', onDown);
+        divEl.addEventListener('touchstart', onDown, { passive: false });
+
+        function onDown(e) {
+            // 在移动端不启用拖动
+            if (window.innerWidth <= 768) return;
+            e.preventDefault();
+
+            if (cfg.leftSel) {
+                target = divEl.parentElement.querySelector(cfg.leftSel) || document.querySelector(cfg.leftSel);
+                isRight = false;
+            } else if (cfg.rightSel) {
+                target = divEl.parentElement.querySelector(cfg.rightSel) || document.querySelector(cfg.rightSel);
+                isRight = true;
+            }
+            if (!target) return;
+
+            startX = e.type === 'touchstart' ? e.touches[0].clientX : e.clientX;
+            startW = target.getBoundingClientRect().width;
+            // 拖动时禁用 transition 避免卡顿
+            target.style.transition = 'none';
+            divEl.classList.add('dragging');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+            document.addEventListener('touchmove', onMove, { passive: false });
+            document.addEventListener('touchend', onUp);
+        }
+
+        function onMove(e) {
+            const clientX = e.type === 'touchmove' ? e.touches[0].clientX : e.clientX;
+            const dx = clientX - startX;
+            let newW = isRight ? startW - dx : startW + dx;
+            newW = Math.max(cfg.min, Math.min(cfg.max, newW));
+            target.style.width = newW + 'px';
+        }
+
+        function onUp() {
+            divEl.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            // 恢复 transition
+            if (target) target.style.transition = '';
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            document.removeEventListener('touchmove', onMove);
+            document.removeEventListener('touchend', onUp);
+        }
+    });
+})();
