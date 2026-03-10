@@ -180,15 +180,15 @@ def _topological_sort_edges(edges: list[dict], node_map: dict) -> list[str]:
     return result
 
 
-def _node_yaml_name(node: dict, use_bot_session: bool = False) -> str:
+def _node_yaml_name(node: dict) -> str:
     """Convert a canvas node to an OASIS YAML expert name.
 
     Each node carries an ``instance`` number (≥1) so the same agent can appear
     multiple times in a layout with distinct identities.
 
     For expert nodes:
-      - use_bot_session=False → "tag#temp#<instance>" (stateless ExpertAgent)
-      - use_bot_session=True  → "tag#oasis#new"       (stateful SessionExpert)
+      - stateful=False (default) → "tag#temp#<instance>" (stateless ExpertAgent)
+      - stateful=True            → "tag#oasis#new"       (stateful SessionExpert)
     For external nodes:
       - "tag#ext#<ext_id>"  (external API agent)
     For session_agent nodes:
@@ -219,7 +219,8 @@ def _node_yaml_name(node: dict, use_bot_session: bool = False) -> str:
         return title
 
     tag = node.get("tag", "custom")
-    if use_bot_session:
+    # Per-node stateful flag: if set, use stateful session mode
+    if node.get("stateful", False):
         return f"{tag}#oasis#new"
     return f"{tag}#temp#{inst}"
 
@@ -270,7 +271,6 @@ def layout_to_yaml(data: dict) -> str:
         "settings": {
             "repeat": false,
             "max_rounds": 5,
-            "use_bot_session": false,
             "cluster_threshold": 150
         }
     }
@@ -281,12 +281,11 @@ def layout_to_yaml(data: dict) -> str:
     settings = data.get("settings", {})
 
     repeat = settings.get("repeat", False)
-    use_bot_session = settings.get("use_bot_session", False)
     node_map = {n["id"]: n for n in nodes}
 
     def _make_expert_step(node):
         """Build a plan step dict for an expert/external node."""
-        step = {"expert": _node_yaml_name(node, use_bot_session)}
+        step = {"expert": _node_yaml_name(node)}
         # Include instruction if node has content
         if node.get("content"):
             step["instruction"] = node["content"]
@@ -506,7 +505,8 @@ def _build_llm_prompt(data: dict) -> str:
         elif n.get("type") == "external":
             expert_list_str += f"  {i}. {n['emoji']} {n['name']}{inst_label} [EXTERNAL API: api_url={n.get('api_url', '?')}] — external OpenAI-compatible service\n"
         else:
-            expert_list_str += f"  {i}. {n['emoji']} {n['name']}{inst_label} (tag: {n['tag']}, temperature: {n.get('temperature', 0.5)}, source: {n.get('source', 'public')})\n"
+            sf_label = " ⚡STATEFUL" if n.get("stateful", False) else ""
+            expert_list_str += f"  {i}. {n['emoji']} {n['name']}{inst_label}{sf_label} (tag: {n['tag']}, temperature: {n.get('temperature', 0.5)}, source: {n.get('source', 'public')})\n"
 
     # ── Describe relationships ──
     relationships = []
@@ -578,7 +578,12 @@ def _build_llm_prompt(data: dict) -> str:
 
     # ── Settings description ──
     repeat_str = "true (repeat plan every round — good for debates/discussions)" if settings.get("repeat", False) else "false (execute plan once — good for task pipelines)"
-    bot_session_str = "Stateful bot mode (experts have memory + tools, suitable for complex task execution)" if settings.get("use_bot_session", False) else "Stateless discussion mode (lightweight, no memory, suitable for debates/brainstorming)"
+    # Describe per-node stateful status
+    stateful_nodes = [n for n in expert_nodes if n.get("stateful", False) and n.get("type") != "external"]
+    if stateful_nodes:
+        stateful_str = "Per-node stateful mode: " + ", ".join(f"{n['name']}(⚡stateful)" for n in stateful_nodes) + " — these experts have memory & tools. Other experts are stateless."
+    else:
+        stateful_str = "All experts are stateless (lightweight, no memory, suitable for debates/brainstorming)"
 
     # ── Generate current rule YAML as reference ──
     try:
@@ -651,7 +656,7 @@ plan:
 
 ## Expert Name Formats
 1. `tag#temp#N` — Preset expert instance N (stateless), e.g. "creative#temp#1", "creative#temp#2" (same expert used twice)
-2. `tag#oasis#new` — Preset expert (stateful session, auto-creates new session), use when bot_session mode is ON
+2. `tag#oasis#new` — Preset expert (stateful session, auto-creates new session), use when the individual node has stateful=true
 3. `Title#session_id` — Existing session agent, referenced by actual session_id, has its own system prompt, tools & memory
 4. `Title#session_id#N` — Same session agent used multiple times (N>1)
 
@@ -674,7 +679,7 @@ plan:
 
 ### Settings:
 - repeat: {repeat_str}
-- Mode: {bot_session_str}
+- Stateful: {stateful_str}
 
 ## Current Rule YAML (Auto-generated Reference)
 

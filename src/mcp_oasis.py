@@ -1072,7 +1072,6 @@ def _yaml_dag_to_layout(plan: list, repeat: bool) -> dict:
         "settings": {
             "repeat": repeat,
             "max_rounds": 5,
-            "use_bot_session": False,
             "cluster_threshold": 150,
         },
     }
@@ -1277,7 +1276,6 @@ def _yaml_linear_to_layout(plan: list, repeat: bool) -> dict:
         "settings": {
             "repeat": repeat,
             "max_rounds": 5,
-            "use_bot_session": False,
             "cluster_threshold": 150,
         },
     }

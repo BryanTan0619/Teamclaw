@@ -85,7 +85,6 @@ function orchBindCardEvents(card, data) {
 
 function orchInit() {
     orchLoadExperts();
-    orchLoadSessionAgents();
     orchLoadOpenClawSessions();
     orchSetupCanvas();
     orchSetupSettings();
@@ -204,34 +203,6 @@ function _orchCreateExpertCard(exp, isCustom) {
         });
     }
     return card;
-}
-
-// ── Load session agents ──
-async function orchLoadSessionAgents() {
-    const list = document.getElementById('orch-expert-list-sessions');
-    list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#9ca3af;text-align:center;">' + t('orch_modal_loading') + '</div>';
-    try {
-        const resp = await fetch('/proxy_sessions');
-        const data = await resp.json();
-        list.innerHTML = '';
-        if (!data.sessions || data.sessions.length === 0) {
-            list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#d1d5db;text-align:center;">' + t('orch_no_session') + '</div>';
-            return;
-        }
-        data.sessions.sort((a, b) => b.session_id.localeCompare(a.session_id));
-        for (const s of data.sessions) {
-            const card = document.createElement('div');
-            card.className = 'orch-expert-card';
-            card.draggable = true;
-            const title = s.title || 'Untitled';
-            card.innerHTML = `<span class="orch-emoji">🤖</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(title)}">${escapeHtml(title)}</div><div class="orch-tag" style="color:#6366f1;font-family:monospace;">#${s.session_id.slice(-8)}</div></div><span class="orch-temp" style="font-size:9px;color:#9ca3af;">${s.message_count||0}msg</span>`;
-            const sessionData = {type:'session_agent', name: title, tag: 'session', emoji:'🤖', temperature: 0.7, session_id: s.session_id};
-            orchBindCardEvents(card, sessionData);
-            list.appendChild(card);
-        }
-    } catch(e) {
-        list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#dc2626;text-align:center;">' + t('orch_load_fail') + '</div>';
-    }
 }
 
 // ── Load OpenClaw agents ──
@@ -1250,7 +1221,6 @@ function orchGetSettings() {
     return {
         repeat: document.getElementById('orch-repeat').checked,
         max_rounds: parseInt(document.getElementById('orch-rounds').value) || 5,
-        use_bot_session: document.getElementById('orch-bot-session').checked,
         cluster_threshold: parseInt(document.getElementById('orch-threshold').value) || 150,
     };
 }
@@ -1270,7 +1240,7 @@ function orchNextInstance(data) {
 function orchAddNode(data, x, y) {
     const id = 'on' + orch.nid++;
     const inst = data.instance || orchNextInstance(data);
-    const node = { id, name: data.name, tag: data.tag||'custom', emoji: data.emoji||'⭐', x: Math.round(x), y: Math.round(y), type: data.type||'expert', temperature: data.temperature||0.5, author: data.author||t('orch_default_author'), content: data.content||'', session_id: data.session_id||'', source: data.source||'', instance: inst };
+    const node = { id, name: data.name, tag: data.tag||'custom', emoji: data.emoji||'⭐', x: Math.round(x), y: Math.round(y), type: data.type||'expert', temperature: data.temperature||0.5, author: data.author||t('orch_default_author'), content: data.content||'', session_id: data.session_id||'', source: data.source||'', instance: inst, stateful: data.stateful||false };
     // Preserve external agent extra fields
     if (data.type === 'external') {
         node.api_url = data.api_url || '';
@@ -1331,9 +1301,10 @@ function orchRenderNode(node) {
         tagLine = `<div class="orch-node-tag">${escapeHtml(node.tag)}</div>`;
     }
     const instrPreview = (node.type !== 'manual' && node.content) ? `<div class="orch-node-instr" title="${escapeHtml(node.content)}" style="font-size:9px;color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px;margin-top:1px;">📋 ${escapeHtml(node.content.length > 20 ? node.content.slice(0,20)+'…' : node.content)}</div>` : '';
+    const statefulBadge = (node.stateful && node.type !== 'external') ? '<span style="display:inline-block;background:#8b5cf6;color:#fff;font-size:8px;font-weight:600;border-radius:3px;padding:0 3px;margin-left:3px;vertical-align:middle;" title="Stateful">⚡S</span>' : '';
     el.innerHTML = `
         <span class="orch-node-emoji">${node.emoji}</span>
-        <div style="min-width:0;flex:1;"><div class="orch-node-name" style="display:flex;align-items:center;">${escapeHtml(node.name)}${instBadge}</div>${tagLine}${instrPreview}</div>
+        <div style="min-width:0;flex:1;"><div class="orch-node-name" style="display:flex;align-items:center;">${escapeHtml(node.name)}${instBadge}${statefulBadge}</div>${tagLine}${instrPreview}</div>
         <div class="orch-node-del" title="${t('orch_node_remove')}">×</div>
         <div class="orch-port port-in" data-node="${node.id}" data-dir="in"></div>
         <div class="orch-port port-out" data-node="${node.id}" data-dir="out"></div>
@@ -1869,6 +1840,8 @@ function orchSaveManual(nodeId) {
 
 // ── Instruction Edit Modal (for expert/session nodes) ──
 function orchShowInstructionModal(node) {
+    const isExternalType = node.type === 'external';
+    const showStateful = !isExternalType;
     const overlay = document.createElement('div');
     overlay.className = 'orch-modal-overlay';
     overlay.id = 'orch-instruction-modal';
@@ -1876,6 +1849,7 @@ function orchShowInstructionModal(node) {
         <h3>📋 ${escapeHtml(node.name)} — Instruction</h3>
         <p style="font-size:11px;color:#6b7280;margin-bottom:8px;">Set a specific instruction for this expert in this step. The expert will focus on this instruction when participating.</p>
         <textarea id="orch-instr-content" placeholder="e.g. Please focus on analyzing technical risks..." style="min-height:80px;">${escapeHtml(node.content||'')}</textarea>
+        ${showStateful ? `<label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11px;color:#374151;cursor:pointer;"><input type="checkbox" id="orch-instr-stateful" ${node.stateful ? 'checked' : ''} style="accent-color:#8b5cf6;"> <span>⚡ ${t('orch_node_stateful')}</span></label><p style="font-size:10px;color:#9ca3af;margin:2px 0 0 22px;">${t('orch_node_stateful_hint')}</p>` : ''}
         <div class="orch-modal-btns">
             <button onclick="document.getElementById('orch-instruction-modal').remove()">${t('orch_modal_cancel')}</button>
             <button class="primary" onclick="orchSaveInstruction('${node.id}')">${t('orch_modal_save')}</button>
@@ -1889,6 +1863,8 @@ function orchSaveInstruction(nodeId) {
     const node = orch.nodes.find(n=>n.id===nodeId);
     if (node) {
         node.content = document.getElementById('orch-instr-content').value;
+        const sfCb = document.getElementById('orch-instr-stateful');
+        if (sfCb) node.stateful = sfCb.checked;
         // Re-render node to update instruction preview
         const el = document.getElementById('onode-' + nodeId);
         if (el) el.remove();
@@ -2289,7 +2265,6 @@ async function orchDoLoadLayout(name) {
         if (data.settings) {
             document.getElementById('orch-repeat').checked = data.settings.repeat === true;
             document.getElementById('orch-rounds').value = data.settings.max_rounds || 5;
-            document.getElementById('orch-bot-session').checked = data.settings.use_bot_session || false;
             if (data.settings.cluster_threshold) {
                 document.getElementById('orch-threshold').value = data.settings.cluster_threshold;
                 document.getElementById('orch-threshold-val').textContent = data.settings.cluster_threshold;
@@ -2394,7 +2369,6 @@ async function orchImportYamlFile(file) {
             if (data.settings) {
                 document.getElementById('orch-repeat').checked = data.settings.repeat === true;
                 document.getElementById('orch-rounds').value = data.settings.max_rounds || 5;
-                document.getElementById('orch-bot-session').checked = data.settings.use_bot_session || false;
                 if (data.settings.cluster_threshold) {
                     document.getElementById('orch-threshold').value = data.settings.cluster_threshold;
                     document.getElementById('orch-threshold-val').textContent = data.settings.cluster_threshold;

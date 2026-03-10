@@ -86,10 +86,7 @@
                 <span data-i18n="setting_max_rounds">Max rounds:</span>
                 <input type="number" id="setting-rounds" value="5" min="1" max="20">
             </label>
-            <label>
-                <input type="checkbox" id="setting-bot-session">
-                <span data-i18n="setting_bot_session">Stateful bot sessions</span>
-            </label>
+            <!-- bot-session removed: stateful is now per-node -->
             <label>
                 <span data-i18n="setting_threshold">Cluster threshold:</span>
                 <input type="range" id="setting-threshold" min="50" max="400" value="150">

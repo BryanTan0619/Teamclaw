@@ -41,7 +41,6 @@ const I18N = {
         panel_settings: '⚙️ 设置',
         setting_repeat: '每轮重复计划',
         setting_max_rounds: '最大轮次：',
-        setting_bot_session: '有状态 Bot 会话',
         setting_threshold: '聚类阈值：',
         panel_credentials: '🔐 Agent 凭证',
         label_username: '用户名：',
@@ -172,7 +171,6 @@ const I18N = {
         panel_settings: '⚙️ Settings',
         setting_repeat: 'Repeat plan each round',
         setting_max_rounds: 'Max rounds:',
-        setting_bot_session: 'Stateful bot sessions',
         setting_threshold: 'Cluster threshold:',
         panel_credentials: '🔐 Agent Credentials',
         label_username: 'Username:',
@@ -325,7 +323,6 @@ const state = {
     settings: {
         repeat: false,
         max_rounds: 5,
-        use_bot_session: false,
         cluster_threshold: 150,
     },
     // Interaction state
@@ -403,6 +400,7 @@ function addNodeToCanvas(data, x, y) {
         temperature: data.temperature || 0.5,
         author: data.author || '主持人',
         content: data.content || '',
+        stateful: data.stateful || false,
     };
     state.nodes.push(node);
     renderNode(node);
@@ -455,11 +453,12 @@ function renderNode(node) {
             }
         }
     }
+    const statefulBadge = (node.stateful && node.type !== 'external') ? ' <span style="display:inline-block;background:#8b5cf6;color:#fff;font-size:8px;font-weight:600;border-radius:3px;padding:0 3px;margin-left:3px;vertical-align:middle;" title="Stateful">⚡S</span>' : '';
 
     el.innerHTML = `
         <span class="node-emoji">${node.emoji}</span>
         <div class="node-info">
-            <div class="node-name">${node.name}</div>
+            <div class="node-name">${node.name}${statefulBadge}</div>
             <div class="node-tag">${tagLabel}</div>
         </div>
         <div class="node-delete" title="${i18n ? i18n('tip_remove') : 'Remove'}">×</div>

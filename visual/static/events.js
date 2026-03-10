@@ -301,11 +301,6 @@ function setupSettingsEvents() {
         updateYamlOutput();
     });
 
-    document.getElementById('setting-bot-session').addEventListener('change', (e) => {
-        state.settings.use_bot_session = e.target.checked;
-        updateYamlOutput();
-    });
-
     document.getElementById('setting-threshold').addEventListener('input', (e) => {
         state.settings.cluster_threshold = parseInt(e.target.value) || 150;
         document.getElementById('threshold-value').textContent = e.target.value + 'px';
@@ -671,7 +666,6 @@ function loadLayoutData(data) {
         Object.assign(state.settings, data.settings);
         document.getElementById('setting-repeat').checked = state.settings.repeat;
         document.getElementById('setting-rounds').value = state.settings.max_rounds;
-        document.getElementById('setting-bot-session').checked = state.settings.use_bot_session;
         document.getElementById('setting-threshold').value = state.settings.cluster_threshold;
         document.getElementById('threshold-value').textContent = state.settings.cluster_threshold + 'px';
     }
