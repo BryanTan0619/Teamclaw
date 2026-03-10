@@ -544,11 +544,13 @@ async function orchWsOpenFile(agentName, workspace, filename, containerEl) {
         const r = await fetch('/proxy_openclaw_workspace_file?workspace=' + encodeURIComponent(workspace) + '&filename=' + encodeURIComponent(filename));
         const res = await r.json();
         const content = res.content || '';
+        const isIdentityFile = (filename === 'IDENTITY.md' || filename === 'SOUL.md');
         editorArea.innerHTML = `
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
                 <span style="font-size:11px;font-weight:600;color:#374151;font-family:monospace;">${escapeHtml(filename)}</span>
                 <div style="display:flex;gap:4px;align-items:center;">
                     <span id="orch-ws-status" style="font-size:10px;color:#9ca3af;"></span>
+                    ${isIdentityFile ? '<button id="orch-ws-import-expert" style="padding:3px 10px;border-radius:4px;border:1px solid #8b5cf6;background:#f5f3ff;color:#7c3aed;cursor:pointer;font-size:11px;" title="' + t('orch_oc_import_expert_tip') + '">📥 ' + t('orch_oc_import_expert') + '</button>' : ''}
                     <button id="orch-ws-save" style="padding:3px 10px;border-radius:4px;border:none;background:#2563eb;color:white;cursor:pointer;font-size:11px;">${t('orch_oc_save')}</button>
                 </div>
             </div>
@@ -582,9 +584,131 @@ async function orchWsOpenFile(agentName, workspace, filename, containerEl) {
             } catch(e) { statusEl.textContent = '❌ ' + t('orch_toast_net_error'); statusEl.style.color = '#ef4444'; }
             saveBtn.disabled = false; saveBtn.textContent = t('orch_oc_save');
         });
+
+        // Import expert persona button (only for IDENTITY.md / SOUL.md)
+        const importBtn = editorArea.querySelector('#orch-ws-import-expert');
+        if (importBtn) {
+            importBtn.addEventListener('click', () => orchShowImportExpertModal(textarea, statusEl));
+        }
     } catch(e) {
         editorArea.innerHTML = '<div style="color:#ef4444;padding:20px;text-align:center;font-size:11px;">❌ ' + t('orch_toast_net_error') + '</div>';
     }
+}
+
+// ── Import Expert Persona into IDENTITY/SOUL file ──
+async function orchShowImportExpertModal(textarea, statusEl) {
+    const overlay = document.createElement('div');
+    overlay.className = 'orch-modal-overlay';
+    overlay.id = 'orch-import-expert-overlay';
+    overlay.innerHTML = `
+        <div class="orch-modal" style="min-width:380px;max-width:550px;width:88vw;max-height:80vh;display:flex;flex-direction:column;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                <h3 style="margin:0;font-size:14px;">📥 ${t('orch_oc_import_expert_title')}</h3>
+                <button id="orch-ie-close" style="background:none;border:none;font-size:18px;cursor:pointer;padding:2px 6px;color:#6b7280;">✕</button>
+            </div>
+            <div style="font-size:11px;color:#6b7280;margin-bottom:10px;">${t('orch_oc_import_expert_desc')}</div>
+            <div style="display:flex;gap:6px;margin-bottom:10px;">
+                <select id="orch-ie-mode" style="padding:4px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+                    <option value="replace">${t('orch_oc_import_replace')}</option>
+                    <option value="append">${t('orch_oc_import_append')}</option>
+                </select>
+                <input id="orch-ie-search" type="text" placeholder="${t('orch_oc_import_search_ph')}" style="flex:1;padding:4px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;">
+            </div>
+            <div id="orch-ie-list" style="flex:1;overflow-y:auto;min-height:0;display:flex;flex-direction:column;gap:4px;">
+                <div style="text-align:center;color:#9ca3af;padding:20px;font-size:11px;">⏳ ${t('loading')}</div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#orch-ie-close').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    const listEl = overlay.querySelector('#orch-ie-list');
+    const searchInput = overlay.querySelector('#orch-ie-search');
+    let allExperts = [];
+
+    try {
+        const r = await fetch('/proxy_visual/experts');
+        allExperts = await r.json();
+    } catch(e) {
+        listEl.innerHTML = '<div style="color:#ef4444;padding:20px;text-align:center;font-size:11px;">❌ ' + t('orch_toast_net_error') + '</div>';
+        return;
+    }
+
+    function renderExpertList(filter) {
+        listEl.innerHTML = '';
+        const keyword = (filter || '').toLowerCase();
+        const filtered = keyword ? allExperts.filter(ex =>
+            (ex.name||'').toLowerCase().includes(keyword) ||
+            (ex.tag||'').toLowerCase().includes(keyword) ||
+            (ex.persona||'').toLowerCase().includes(keyword) ||
+            (ex.category||'').toLowerCase().includes(keyword)
+        ) : allExperts;
+
+        if (filtered.length === 0) {
+            listEl.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:20px;font-size:11px;">' + t('orch_oc_import_no_result') + '</div>';
+            return;
+        }
+
+        // Group by source
+        const groups = { public: [], agency: [], custom: [] };
+        filtered.forEach(ex => {
+            const src = ex.source || 'public';
+            if (groups[src]) groups[src].push(ex);
+            else groups.public.push(ex);
+        });
+
+        const groupLabels = {
+            public: { icon: '🌟', label: t('orch_oc_import_public') },
+            agency: { icon: '🏢', label: t('orch_oc_import_agency') },
+            custom: { icon: '🛠️', label: t('orch_oc_import_custom') },
+        };
+
+        for (const [src, items] of Object.entries(groups)) {
+            if (items.length === 0) continue;
+            const info = groupLabels[src] || { icon: '📂', label: src };
+            const header = document.createElement('div');
+            header.style.cssText = 'font-size:10px;font-weight:600;color:#6b7280;padding:4px 0;margin-top:4px;';
+            header.textContent = info.icon + ' ' + info.label + ' (' + items.length + ')';
+            listEl.appendChild(header);
+
+            for (const ex of items) {
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;transition:all .15s;background:#fff;';
+                row.addEventListener('mouseenter', () => { row.style.background = '#f5f3ff'; row.style.borderColor = '#c4b5fd'; });
+                row.addEventListener('mouseleave', () => { row.style.background = '#fff'; row.style.borderColor = '#e5e7eb'; });
+
+                const personaPreview = (ex.persona || '').length > 80 ? (ex.persona.slice(0, 80) + '…') : (ex.persona || '-');
+                row.innerHTML = `
+                    <span style="font-size:18px;flex-shrink:0;">${ex.emoji || '⭐'}</span>
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-size:12px;font-weight:600;color:#1f2937;">${escapeHtml(ex.name)}</div>
+                        <div style="font-size:10px;color:#6b7280;margin-top:1px;">${escapeHtml(ex.tag)}${ex.category ? ' · ' + escapeHtml(ex.category) : ''}</div>
+                        <div style="font-size:10px;color:#9ca3af;margin-top:3px;line-height:1.4;white-space:pre-wrap;word-break:break-all;">${escapeHtml(personaPreview)}</div>
+                    </div>
+                    <span style="font-size:14px;color:#7c3aed;flex-shrink:0;margin-top:2px;">→</span>
+                `;
+                row.addEventListener('click', () => {
+                    const mode = overlay.querySelector('#orch-ie-mode').value;
+                    const persona = ex.persona || '';
+                    // Build identity content with expert name and persona
+                    const identityContent = '# ' + (ex.name || ex.tag) + '\n\n' + persona;
+                    if (mode === 'replace') {
+                        textarea.value = identityContent;
+                    } else {
+                        textarea.value = textarea.value + (textarea.value ? '\n\n---\n\n' : '') + identityContent;
+                    }
+                    statusEl.textContent = '● ' + t('orch_oc_unsaved'); statusEl.style.color = '#f59e0b';
+                    orchToast('📥 ' + t('orch_oc_import_done', { name: ex.name }));
+                    overlay.remove();
+                });
+                listEl.appendChild(row);
+            }
+        }
+    }
+
+    renderExpertList('');
+    searchInput.addEventListener('input', () => renderExpertList(searchInput.value));
 }
 
 // ── Tab: Skills & Tools Config ──
