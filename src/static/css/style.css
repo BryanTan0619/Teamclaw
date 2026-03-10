@@ -779,6 +779,46 @@ header {
 .session-item { position: relative; }
 .session-item:hover .session-delete { display: block; }
 .session-item .session-delete:hover { background: #fca5a5; }
+/* Agent edit button on session items */
+.session-item .session-edit {
+    display: none; position: absolute; right: 50px; top: 50%; transform: translateY(-50%);
+    background: #dbeafe; color: #2563eb; border: none; border-radius: 4px;
+    font-size: 11px; padding: 2px 6px; cursor: pointer; line-height: 1.2;
+}
+.session-item:hover .session-edit { display: block; }
+.session-item .session-edit:hover { background: #bfdbfe; }
+/* Agent Meta Modal */
+.agent-meta-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 10000;
+    display: flex; align-items: center; justify-content: center;
+}
+.agent-meta-dialog {
+    background: white; border-radius: 12px; width: 360px; max-width: 90vw;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.2); overflow: hidden;
+}
+.agent-meta-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 18px; border-bottom: 1px solid #e5e7eb; background: #f9fafb;
+}
+.agent-meta-header h3 { margin: 0; font-size: 15px; font-weight: 600; color: #374151; }
+.agent-meta-close { background: none; border: none; font-size: 20px; color: #9ca3af; cursor: pointer; line-height: 1; }
+.agent-meta-close:hover { color: #374151; }
+.agent-meta-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; }
+.agent-meta-label { font-size: 12px; font-weight: 600; color: #6b7280; margin-bottom: -4px; }
+.agent-meta-input {
+    padding: 7px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px;
+    outline: none; transition: border-color 0.15s;
+}
+.agent-meta-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,0.15); }
+.agent-meta-footer {
+    display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px;
+    border-top: 1px solid #e5e7eb; background: #f9fafb;
+}
+.agent-meta-btn { padding: 6px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; border: 1px solid transparent; }
+.agent-meta-btn-cancel { background: #f3f4f6; color: #374151; border-color: #d1d5db; }
+.agent-meta-btn-cancel:hover { background: #e5e7eb; }
+.agent-meta-btn-save { background: #3b82f6; color: white; }
+.agent-meta-btn-save:hover { background: #2563eb; }
 @keyframes session-glow-user {
     0%, 100% { box-shadow: 0 0 4px 1px rgba(59,130,246,0.3); }
     50% { box-shadow: 0 0 10px 3px rgba(59,130,246,0.5); }

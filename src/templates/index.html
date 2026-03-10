@@ -606,6 +606,28 @@
     }
     </script>
 
+    <!-- Agent Meta Modal -->
+    <div id="agent-meta-modal" class="agent-meta-overlay" style="display:none;" onclick="if(event.target===this)closeAgentMetaModal()">
+        <div class="agent-meta-dialog">
+            <div class="agent-meta-header">
+                <h3 id="agent-meta-modal-title">🤖 Agent Settings</h3>
+                <button onclick="closeAgentMetaModal()" class="agent-meta-close">&times;</button>
+            </div>
+            <div class="agent-meta-body">
+                <label class="agent-meta-label">Name</label>
+                <input type="text" id="agent-meta-name" class="agent-meta-input" placeholder="(None)">
+                <label class="agent-meta-label">Tools</label>
+                <input type="text" id="agent-meta-tools" class="agent-meta-input" placeholder="(None) e.g. tool1,tool2 / all / none">
+                <label class="agent-meta-label">Tag</label>
+                <input type="text" id="agent-meta-tag" class="agent-meta-input" placeholder="(None)">
+            </div>
+            <div class="agent-meta-footer">
+                <button onclick="closeAgentMetaModal()" class="agent-meta-btn agent-meta-btn-cancel">Cancel</button>
+                <button onclick="submitAgentMeta()" class="agent-meta-btn agent-meta-btn-save">Save</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Settings Modal -->
     <div id="settings-modal" class="settings-modal-overlay" style="display:none;" onclick="if(event.target===this)closeSettings()">
         <div class="settings-modal">

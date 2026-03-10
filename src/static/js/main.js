@@ -225,8 +225,8 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         orch_start_node: '开始',
         orch_end_node: '结束',
         orch_cond_node: '选择器',
-        orch_start_author: '系统',
-        orch_end_author: '系统',
+        orch_start_author: 'begin',
+        orch_end_author: 'bend',
         orch_start_default_content: '讨论开始',
         orch_end_default_content: '讨论结束',
         orch_cond_already_selector: '已经是选择器节点',
@@ -281,8 +281,8 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         orch_start_node: '开始',
         orch_end_node: '结束',
         orch_cond_node: '选择器',
-        orch_start_author: '系统',
-        orch_end_author: '系统',
+        orch_start_author: 'begin',
+        orch_end_author: 'bend',
         orch_start_default_content: '讨论开始',
         orch_end_default_content: '讨论结束',
         orch_cond_already_selector: '已经是选择器节点',
@@ -680,8 +680,8 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         orch_start_node: 'Start',
         orch_end_node: 'End',
         orch_cond_node: 'Selector',
-        orch_start_author: 'System',
-        orch_end_author: 'System',
+        orch_start_author: 'begin',
+        orch_end_author: 'bend',
         orch_start_default_content: 'Discussion started',
         orch_end_default_content: 'Discussion ended',
         orch_cond_already_selector: 'is already a selector',
@@ -736,8 +736,8 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         orch_start_node: 'Start',
         orch_end_node: 'End',
         orch_cond_node: 'Selector',
-        orch_start_author: 'System',
-        orch_end_author: 'System',
+        orch_start_author: 'begin',
+        orch_end_author: 'bend',
         orch_start_default_content: 'Discussion started',
         orch_end_default_content: 'Discussion ended',
         orch_cond_already_selector: 'is already a selector',
@@ -1304,19 +1304,106 @@ function updateSessionDisplay() {
     }
 }
 
+// ===== Agent Meta Modal Logic =====
+let _agentMetaCallback = null;  // resolve fn for the modal promise
+let _agentMetaMode = 'create';  // 'create' or 'edit'
+let _agentMetaSessionId = null;
+
+function openAgentMetaModal(mode, sessionId, existingMeta) {
+    _agentMetaMode = mode;
+    _agentMetaSessionId = sessionId;
+    const modal = document.getElementById('agent-meta-modal');
+    document.getElementById('agent-meta-modal-title').textContent =
+        mode === 'edit' ? '✏️ Edit Agent Settings' : '🤖 New Agent Settings';
+    document.getElementById('agent-meta-name').value = (existingMeta && existingMeta.name) || '';
+    document.getElementById('agent-meta-tools').value = (existingMeta && existingMeta.tools) || '';
+    document.getElementById('agent-meta-tag').value = (existingMeta && existingMeta.tag) || '';
+    modal.style.display = 'flex';
+    document.getElementById('agent-meta-name').focus();
+    return new Promise(resolve => { _agentMetaCallback = resolve; });
+}
+
+function closeAgentMetaModal() {
+    document.getElementById('agent-meta-modal').style.display = 'none';
+    if (_agentMetaCallback) { _agentMetaCallback(null); _agentMetaCallback = null; }
+}
+
+function _collectAgentMeta() {
+    const name = document.getElementById('agent-meta-name').value.trim() || null;
+    let tools = document.getElementById('agent-meta-tools').value.trim() || null;
+    const tag = document.getElementById('agent-meta-tag').value.trim() || null;
+    // Parse tools: if comma-separated, split to object
+    if (tools && tools !== 'all' && tools !== 'none') {
+        const obj = {};
+        tools.split(',').map(t => t.trim()).filter(Boolean).forEach(t => obj[t] = true);
+        tools = obj;
+    }
+    const meta = {};
+    if (name !== null) meta.name = name;
+    if (tools !== null) meta.tools = tools;
+    if (tag !== null) meta.tag = tag;
+    return meta;
+}
+
+async function submitAgentMeta() {
+    const meta = _collectAgentMeta();
+    if (_agentMetaMode === 'edit' && _agentMetaSessionId) {
+        // Update existing agent via PUT
+        try {
+            await fetch(`/internal_agents/${encodeURIComponent(_agentMetaSessionId)}`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ meta })
+            });
+        } catch (e) { console.warn('Failed to update agent meta', e); }
+    }
+    document.getElementById('agent-meta-modal').style.display = 'none';
+    if (_agentMetaCallback) { _agentMetaCallback(meta); _agentMetaCallback = null; }
+}
+
+async function editAgentMeta(sessionId) {
+    // Load current meta from backend
+    let existingMeta = {};
+    try {
+        const resp = await fetch('/internal_agents');
+        const data = await resp.json();
+        if (data.agents) {
+            const found = data.agents.find(a => a.session === sessionId);
+            if (found && found.meta) existingMeta = found.meta;
+        }
+    } catch (e) { /* ignore */ }
+    // If tools is object, convert back to comma string for display
+    if (existingMeta.tools && typeof existingMeta.tools === 'object') {
+        existingMeta.tools = Object.keys(existingMeta.tools).join(',');
+    }
+    await openAgentMetaModal('edit', sessionId, existingMeta);
+}
+
 function handleNewSession() {
-    if (!confirm(t('new_session_confirm'))) return;
-    currentSessionId = generateSessionId();
-    sessionStorage.setItem('sessionId', currentSessionId);
-    updateSessionDisplay();
-    // Clear chat box for new conversation
-    const chatBox = document.getElementById('chat-box');
-    chatBox.innerHTML = `
-        <div class="flex justify-start">
-            <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700">
-                ${t('new_session_message')}
-            </div>
-        </div>`;
+    // Open the agent meta modal; after user submits, create session + write JSON
+    const newSid = generateSessionId();
+    openAgentMetaModal('create', newSid, {}).then(async (meta) => {
+        if (meta === null) return;  // User cancelled
+        currentSessionId = newSid;
+        sessionStorage.setItem('sessionId', currentSessionId);
+        updateSessionDisplay();
+        // Clear chat box for new conversation
+        const chatBox = document.getElementById('chat-box');
+        chatBox.innerHTML = `
+            <div class="flex justify-start">
+                <div class="message-agent bg-white border p-4 max-w-[85%] shadow-sm text-gray-700">
+                    ${t('new_session_message')}
+                </div>
+            </div>`;
+        // Write internal agent JSON
+        try {
+            await fetch('/internal_agents', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ session: newSid, meta: meta })
+            });
+        } catch (e) { console.warn('Failed to save internal agent', e); }
+    });
 }
 
 // ===== 历史会话侧边栏 =====
@@ -1420,6 +1507,7 @@ async function loadSessionList() {
             div.innerHTML = `
                 <div class="session-title">${escapeHtml(s.title)}</div>
                 <div class="session-meta">#${s.session_id.slice(-6)} · ${s.message_count}${t('messages_count')}</div>
+                <button class="session-edit" onclick="event.stopPropagation(); editAgentMeta('${s.session_id}')">✏️</button>
                 <button class="session-delete" onclick="event.stopPropagation(); deleteSession('${s.session_id}')">${t('delete_session')}</button>
             `;
             div.onclick = () => switchToSession(s.session_id);
@@ -1502,6 +1590,7 @@ async function refreshHistoryList() {
                 div.innerHTML = `
                     <div class="session-title">${escapeHtml(s.title)}</div>
                     <div class="session-meta">#${s.session_id.slice(-6)} · ${s.message_count}${t('messages_count')}</div>
+                    <button class="session-edit" onclick="event.stopPropagation(); editAgentMeta('${s.session_id}')">✏️</button>
                     <button class="session-delete" onclick="event.stopPropagation(); deleteSession('${s.session_id}')">${t('delete_session')}</button>
                 `;
                 div.onclick = () => switchToSession(s.session_id);
@@ -1584,6 +1673,10 @@ async function deleteSession(sessionId) {
         });
         const data = await resp.json();
         if (resp.ok && data.status === 'success') {
+            // Also delete internal agent JSON record
+            try {
+                await fetch(`/internal_agents/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
+            } catch (e) { /* ignore if not found */ }
             // 如果删除的是当前会话，自动开一个新的
             if (sessionId === currentSessionId) {
                 currentSessionId = generateSessionId();
