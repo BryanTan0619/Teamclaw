@@ -11,10 +11,10 @@ compatibility:
   - "ollama"
 
 
-argument-hint: "[BEFORE FIRST LAUNCH - MUST CONFIGURE] (1) LLM_API_KEY: your LLM provider API key (required). (2) LLM_BASE_URL: the base URL of your LLM provider (e.g. https://api.deepseek.com). (3) LLM_MODEL: the model name to use (e.g. deepseek-chat, gpt-4o, gemini-2.5-flash). [NETWORK] Requires outbound access for LLM/TTS APIs. Uses ports 51200-51209. [BOTS] Optional integrations: TELEGRAM_BOT_TOKEN, QQ_APP_ID, QQ_BOT_SECRET. [TUNNEL] Set PUBLIC_DOMAIN to enable secure Cloudflare Tunneling. Public deployment is entirely user-controlled (start-tunnel / stop-tunnel / frontend toggle). CRITICAL: Agent MUST NOT download cloudflared or start the tunnel unless the user EXPLICITLY requests it. Agent retrieves public URL via get_publicnet_info() tool (queries GET /publicnet/info), never reads .env directly."
+argument-hint: "[BEFORE FIRST LAUNCH - MUST CONFIGURE] (1) LLM_API_KEY: your LLM provider API key (required). (2) LLM_BASE_URL: the base URL of your LLM provider (e.g. https://api.deepseek.com). (3) LLM_MODEL: the model name to use; if the user does NOT provide one, the agent MUST discover the newest callable chat model for the supplied API key by querying the provider and validating it with a real request before writing LLM_MODEL. [NETWORK] Requires outbound access for LLM/TTS APIs. Uses ports 51200-51209. [BOTS] Optional integrations: TELEGRAM_BOT_TOKEN, QQ_APP_ID, QQ_BOT_SECRET. [TUNNEL] Set PUBLIC_DOMAIN to enable secure Cloudflare Tunneling. Public deployment is entirely user-controlled (start-tunnel / stop-tunnel / frontend toggle). CRITICAL: Agent MUST NOT download cloudflared or start the tunnel unless the user EXPLICITLY requests it. Agent retrieves public URL via get_publicnet_info() tool (queries GET /publicnet/info), never reads .env directly."
 
 metadata:
-  version: "1.0.1"
+  version: "1.0.2"
   github: "https://github.com/Avalon-467/Teamclaw"
   ports:
     agent: 51200
@@ -1284,6 +1284,8 @@ Before starting TeamClaw for the first time, the following environment variables
 | `LLM_BASE_URL` | Base URL of your LLM provider's API endpoint. | `https://api.deepseek.com` |
 | `LLM_MODEL` | The model name to use for conversations. | `deepseek-chat` / `gpt-4o` / `gemini-2.5-flash` |
 
+> ⚠️ **If the user does not specify `LLM_MODEL`**: the agent MUST auto-detect it instead of guessing. Use the supplied API key and base URL to list provider models, choose the newest plausible chat model, then confirm it with a real completion request before writing `LLM_MODEL` into `config/.env`.
+
 ```bash
 bash selfskill/scripts/run.sh configure --batch \
   LLM_API_KEY=sk-your-key \
@@ -1359,6 +1361,8 @@ The `check-openclaw` command will:
 5. Write all detected values to TeamClaw's `config/.env`
 
 > 💡 **Note**: OpenClaw agents are primarily invoked via CLI (`openclaw agent --agent <name> --message <msg>`), which does not require API keys. The `OPENCLAW_GATEWAY_TOKEN` is only used as a fallback when CLI is unavailable.
+>
+> ⚠️ **OpenClaw token caveat (important)**: on newer OpenClaw versions, `openclaw config get gateway.auth.token` may return the masked placeholder `__OPENCLAW_REDACTED__` instead of the real token. Treat that value as masked output, not a usable credential. If the Dashboard says `gateway token missing`, prefer `openclaw dashboard --no-open` and open the tokenized URL it prints, or read the real token from `~/.openclaw/openclaw.json` → `gateway.auth.token`. Never write `__OPENCLAW_REDACTED__` into TeamClaw's `.env`.
 
 **Default Workspace Templates:**
 
@@ -1433,6 +1437,8 @@ When the tunnel starts, `cloudflared` is **auto-downloaded** if not present, and
 | `LLM_API_KEY` | LLM 服务商的 API 密钥，**必填项**。 | `sk-xxxxxxxxxxxxxxxx` |
 | `LLM_BASE_URL` | LLM 服务商的 API 基础地址。 | `https://api.deepseek.com` |
 | `LLM_MODEL` | 使用的模型名称。 | `deepseek-chat` / `gpt-4o` / `gemini-2.5-flash` |
+
+> ⚠️ **如果用户没有指定 `LLM_MODEL`**：Agent 不得猜测或直接套示例默认值。必须使用用户提供的 API key 和 base URL 先列出可用模型，选择最新且合理的对话模型，再用一次真实请求验证可调用后，才写入 `config/.env`。
 
 ```bash
 bash selfskill/scripts/run.sh configure --batch \
@@ -1509,6 +1515,8 @@ TeamClaw 和 OpenClaw 使用**独立的 API 密钥配置** —— 用途不同�
 5. 将所有探测到的值写入 TeamClaw 的 `config/.env`
 
 > 💡 **提示**：OpenClaw agent 主要通过 CLI 调用（`openclaw agent --agent <name> --message <msg>`），无需 API 密钥。`OPENCLAW_GATEWAY_TOKEN` 仅在 CLI 不可用时作为 HTTP 回退的认证凭据。
+>
+> ⚠️ **OpenClaw token 特别说明**：较新的 OpenClaw 版本里，`openclaw config get gateway.auth.token` 可能只会返回脱敏占位符 `__OPENCLAW_REDACTED__`，这不是可用 token。遇到 Dashboard 报 `gateway token missing` 时，优先执行 `openclaw dashboard --no-open`，使用它输出的带 token 链接；或者从 `~/.openclaw/openclaw.json` 的 `gateway.auth.token` 读取真实 token。绝不能把 `__OPENCLAW_REDACTED__` 写入 TeamClaw 的 `.env`。
 
 **Workspace 默认模板：**
 
