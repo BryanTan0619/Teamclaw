@@ -300,13 +300,25 @@ async function orchLoadSessionAgents() {
         const [resp, agentMap] = await Promise.all([fetch('/proxy_sessions'), _orchLoadAgentMetaMap()]);
         const data = await resp.json();
         list.innerHTML = '';
-        if (!data.sessions || data.sessions.length === 0) {
+
+        // Build merged session list: start from proxy_sessions, then add any JSON-only entries
+        const sessions = (data.sessions || []).slice();
+        const seenIds = new Set(sessions.map(s => s.session_id));
+        // Add sessions that exist in internal agent JSON but not in proxy_sessions
+        for (const [sid, meta] of Object.entries(agentMap)) {
+            if (!seenIds.has(sid)) {
+                sessions.push({ session_id: sid, title: meta.name || 'Untitled', message_count: 0 });
+                seenIds.add(sid);
+            }
+        }
+
+        if (sessions.length === 0) {
             list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#d1d5db;text-align:center;">No sessions yet</div>';
             return;
         }
         // Sort by session_id descending (newest first)
-        data.sessions.sort((a, b) => b.session_id.localeCompare(a.session_id));
-        for (const s of data.sessions) {
+        sessions.sort((a, b) => b.session_id.localeCompare(a.session_id));
+        for (const s of sessions) {
             const card = document.createElement('div');
             card.className = 'orch-expert-card';
             card.draggable = true;
@@ -314,13 +326,17 @@ async function orchLoadSessionAgents() {
             const shortId = s.session_id.slice(-8);
             const msgCount = s.message_count || 0;
             card.innerHTML = `<span class="orch-emoji">💬</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(title)}">${escapeHtml(title)}</div><div class="orch-tag" style="color:#6366f1;font-family:monospace;">#${escapeHtml(shortId)} · ${msgCount} msgs</div></div>`;
+            // Carry agent meta tag (from internal agent JSON) if available
+            const meta = agentMap[s.session_id] || {};
+            const agentTag = meta.tag || '';
             const nodeData = {
                 type: 'session_agent',
                 name: title,
-                tag: 'session',
+                tag: agentTag || '',
                 emoji: '💬',
                 temperature: 0.5,
                 session_id: s.session_id,
+                agent_name: meta.name || title,
             };
             orchBindCardEvents(card, nodeData);
             list.appendChild(card);
@@ -1384,6 +1400,8 @@ function orchAddNode(data, x, y) {
     const node = { id, name: data.name, tag: data.tag||'custom', emoji: data.emoji||'⭐', x: Math.round(x), y: Math.round(y), type: data.type||'expert', temperature: data.temperature||0.5, author: data.author||t('orch_default_author'), content: data.content||'', session_id: data.session_id||'', source: data.source||'', instance: inst, stateful: data.stateful||false };
     // Preserve selector node flag
     if (data.isSelector) node.isSelector = true;
+    // Preserve session agent name for YAML generation
+    if (data.type === 'session_agent' && data.agent_name) node.agent_name = data.agent_name;
     // Preserve external agent extra fields
     if (data.type === 'external') {
         node.api_url = data.api_url || '';

@@ -5,11 +5,11 @@ Manages the full lifecycle of a discussion:
   Round loop -> scheduled/parallel expert participation -> consensus check -> summarize
 
 Three expert backends:
-  1. ExpertAgent  — direct LLM (stateless, name="title#temp#N")
-  2. SessionExpert — existing bot session (stateful, name="title#session_id")
-     - "#oasis#" in session_id → oasis-managed, first-round identity injection
-     - other session_id → regular agent, no identity injection
-  3. ExternalExpert — external OpenAI-compatible API (name="title#ext#id")
+  1. ExpertAgent  — direct LLM (stateless, name="tag#temp#N")
+  2. SessionExpert — internal session agent (stateful, name="tag#oasis#name" or "#oasis#name")
+     - name is resolved to session_id via internal agent JSON ({user_id}_agent.json)
+     - tag (if present) enables persona injection from presets
+  3. ExternalExpert — external OpenAI-compatible API (name="tag#ext#id")
      - Directly calls external endpoints (DeepSeek, GPT-4, Ollama, etc)
      - Configured per-expert via YAML: api_url, api_key, model
      - OpenClaw CLI priority: model "agent:<name>" uses CLI first, HTTP fallback
@@ -19,16 +19,14 @@ Expert pool sourcing (YAML-only, schedule_file or schedule_yaml required):
   Priority: schedule_file > schedule_yaml (file takes precedence if both provided).
   Names MUST contain '#' to specify type:
     "tag#temp#N"              → ExpertAgent (tag looked up in presets for name/persona)
-    "tag#oasis#<random_id>"  → SessionExpert (oasis, tag→name/persona from presets)
+    "tag#oasis#<name>"       → SessionExpert (name→session lookup, tag→persona)
+    "#oasis#<name>"          → SessionExpert (name→session lookup, no tag)
     "name#ext#<id>"          → ExternalExpert (requires api_url in YAML)
-    "title#<session_id>"     → SessionExpert (regular agent, no injection)
   Names without '#' are skipped with a warning.
 
-  Session IDs can be anything — new IDs automatically create new sessions
-  in the Agent checkpoint DB on first API call (lazy creation).
+  Session IDs are resolved from agent names via internal agent JSON.
   To explicitly ensure a fresh session, append "#new" to the name:
-    "tag#oasis#ab12#new"  → "#new" is stripped, "ab12" replaced with a random UUID
-    "助手#my_session#new" → "#new" is stripped, "my_session" replaced with a random UUID
+    "tag#oasis#name#new"  → "#new" is stripped, resolved session_id replaced with random UUID
   This guarantees no accidental reuse of an existing session.
 
   If YAML uses `all_experts: true`, all experts in the pool speak in parallel.
@@ -38,8 +36,9 @@ Expert pool sourcing (YAML-only, schedule_file or schedule_yaml required):
     plan:
       - all_experts: true
 
-No separate expert-session storage: oasis sessions identified by "#oasis#"
-in session_id, lazily created in Agent checkpoint DB on first bot API call.
+No separate expert-session storage: session_ids are resolved from agent names
+via internal agent JSON ({user_id}_agent.json), then used to access the
+Agent checkpoint DB.
 
 Execution modes:
   1. Default (repeat + all_experts): all experts participate in parallel each round
@@ -47,6 +46,7 @@ Execution modes:
 """
 
 import asyncio
+import json
 import os
 import re
 import sys
@@ -68,6 +68,51 @@ from oasis.scheduler import (
 
 # Maximum total node executions across all super-steps (safety limit)
 _MAX_TOTAL_NODE_EXECS = 500
+
+# Path to internal agent config directory
+_INTERNAL_AGENT_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "data", "user_files", "internalagent"
+)
+
+
+def _load_internal_agents(user_id: str) -> list[dict]:
+    """Load the internal-agent JSON list for a user.
+
+    Returns list of {"session": "<id>", "meta": {"name": ..., "tag": ...}} entries.
+    Returns [] if file missing or unreadable.
+    """
+    p = os.path.join(_INTERNAL_AGENT_DIR, f"{user_id}_agent.json")
+    if not os.path.isfile(p):
+        return []
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def _resolve_session_by_name(agents: list[dict], name: str) -> str | None:
+    """Find session_id by matching agent meta.name (case-insensitive).
+
+    Returns the session_id string, or None if not found.
+    """
+    name_lower = name.lower()
+    for a in agents:
+        meta = a.get("meta", {})
+        if meta.get("name", "").lower() == name_lower:
+            return a.get("session", "")
+    return None
+
+
+def _find_tag_in_internal_agents(agents: list[dict], session_id: str) -> str:
+    """Find the tag from internal agent JSON by session_id.
+
+    Returns the tag string, or "" if not found.
+    """
+    for a in agents:
+        if a.get("session") == session_id:
+            return a.get("meta", {}).get("tag", "")
+    return ""
 
 # Regex for parsing selector node output: [oasis reply choose N]
 _OASIS_REPLY_CHOOSE_RE = re.compile(r"\[oasis\s+reply\s+choose\s+(\d+)\]", re.IGNORECASE)
@@ -101,9 +146,9 @@ class DiscussionEngine:
     Pool construction (YAML-only):
       Expert pool is built entirely from YAML expert names (deduplicated).
       "tag#temp#N"          → ExpertAgent (tag→name/persona from presets)
-      "tag#oasis#id"        → SessionExpert (oasis, tag→name/persona)
+      "tag#oasis#name"      → SessionExpert (name→session lookup, tag→persona)
+      "#oasis#name"         → SessionExpert (name→session lookup, no tag)
       "name#ext#id"         → ExternalExpert (api_url/api_key/model from YAML)
-      "title#session_id"    → SessionExpert (regular, no injection)
       Any name + "#new"     → force fresh session (id replaced with random UUID)
     """
 
@@ -151,6 +196,7 @@ class DiscussionEngine:
 
         yaml_names = extract_expert_names(self.schedule)
         ext_configs = collect_external_configs(self.schedule)
+        internal_agents = _load_internal_agents(user_id)  # for name→session lookup
         seen: set[str] = set()
         # Map YAML original names → expert (built during pool construction)
         yaml_to_expert: dict[str, ExpertAgent | SessionExpert | ExternalExpert] = {}
@@ -161,7 +207,7 @@ class DiscussionEngine:
 
             if "#" not in full_name:
                 print(f"  [OASIS] ⚠️ YAML expert name '{full_name}' has no '#', skipping. "
-                      f"Use 'tag#temp#N' or 'tag#oasis#id' or 'name#ext#id' or 'title#session_id'.")
+                      f"Use 'tag#temp#N' or 'tag#oasis#name' or '#oasis#name' or 'name#ext#id'.")
                 continue
 
             # Handle #new suffix: strip only "new", keep the '#' separator
@@ -215,46 +261,67 @@ class DiscussionEngine:
                     tag=first,
                 )
             elif "#oasis#" in sid or sid.startswith("oasis#"):
-                # e.g. "creative#oasis#ab12cd34" → SessionExpert (oasis)
-                config = self._lookup_by_tag(first, user_id)
-                expert_name = config["name"] if config else first
-                persona = config.get("persona", "") if config else ""
+                # Session agent by name:
+                #   "tag#oasis#<name>"      → name lookup for session_id (tag→persona)
+                #   "oasis#<name>"          → name lookup (no tag, first is empty from '#oasis#name' split)
+                # Also handles leading '#': '#oasis#name' splits as first='', sid='oasis#name'
+
+                # Extract the part after 'oasis#'
+                oasis_rest = sid.split("oasis#", 1)[1] if "oasis#" in sid else ""
+
+                # Resolve oasis_rest as an agent name
+                resolved_sid = _resolve_session_by_name(internal_agents, oasis_rest) if oasis_rest else None
+
+                if not resolved_sid:
+                    print(f"  [OASIS] ⚠️ Cannot resolve agent name '{oasis_rest}' from internal agents JSON, skipping '{full_name}'.")
+                    continue
+
+                agent_name = oasis_rest
+                tag_for_lookup = first  # may be empty for '#oasis#name'
+
                 if force_new:
-                    # Replace the id part with a fresh UUID
-                    actual_sid = f"oasis#{uuid.uuid4().hex[:8]}"
-                    print(f"  [OASIS] 🆕 #new: '{full_name}' → new session '{first}#{actual_sid}'")
+                    actual_sid = uuid.uuid4().hex[:8]
+                    print(f"  [OASIS] 🆕 #new: '{full_name}' → new session '{actual_sid}'")
                 else:
-                    actual_sid = sid
+                    actual_sid = resolved_sid
+
+                # Tag lookup for persona (like ExternalExpert): found → use it, not found → skip
+                persona = ""
+                expert_name = agent_name
+                ia_tag = ""
+                if tag_for_lookup:
+                    config = self._lookup_by_tag(tag_for_lookup, user_id)
+                    if config:
+                        expert_name = config.get("name", agent_name)
+                        persona = config.get("persona", "")
+                        print(f"  [OASIS] 🏷️ Tag '{tag_for_lookup}' → persona for '{expert_name}'")
+                else:
+                    # No explicit tag in YAML, try to find tag from internal agent JSON
+                    ia_tag = _find_tag_in_internal_agents(internal_agents, resolved_sid)
+                    if ia_tag:
+                        config = self._lookup_by_tag(ia_tag, user_id)
+                        if config:
+                            persona = config.get("persona", "")
+                            print(f"  [OASIS] 🏷️ Auto-detected tag '{ia_tag}' → persona for '{expert_name}'")
+
                 cfg = ext_configs.get(full_name, {})
                 expert = SessionExpert(
                     name=expert_name,
-                    session_id=f"{first}#{actual_sid}",
+                    session_id=actual_sid,
                     user_id=user_id,
                     persona=persona,
                     bot_base_url=bot_base_url,
                     enabled_tools=bot_enabled_tools,
                     timeout=bot_timeout,
-                    tag=first,
+                    tag=tag_for_lookup or ia_tag,
                     extra_headers=cfg.get("headers"),
                 )
+                print(f"  [OASIS] 💬 Session agent (name): '{agent_name}' → session '{actual_sid}'")
             else:
-                # e.g. "助手#default" → SessionExpert (regular agent, no injection)
-                if force_new:
-                    actual_sid = uuid.uuid4().hex[:8]
-                    print(f"  [OASIS] 🆕 #new: '{full_name}' → new session '{actual_sid}'")
-                else:
-                    actual_sid = sid
-                cfg = ext_configs.get(full_name, {})
-                expert = SessionExpert(
-                    name=first,
-                    session_id=actual_sid,
-                    user_id=user_id,
-                    persona="",
-                    bot_base_url=bot_base_url,
-                    enabled_tools=bot_enabled_tools,
-                    timeout=bot_timeout,
-                    extra_headers=cfg.get("headers"),
-                )
+                # Unknown format — skip with warning
+                print(f"  [OASIS] ⚠️ Unrecognized expert name format '{full_name}', skipping. "
+                      f"Use 'tag#temp#N' or 'tag#oasis#name' or '#oasis#name' or 'name#ext#id'.")
+                continue
 
             experts_list.append(expert)
             # Register YAML original name → expert immediately (handles #new correctly)
@@ -268,7 +335,7 @@ class DiscussionEngine:
         self._expert_map: dict[str, ExpertAgent | SessionExpert | ExternalExpert] = {}
         self._expert_map.update(yaml_to_expert)
         for e in self.experts:
-            self._expert_map.setdefault(e.name, e)       # "创意专家#creative#oasis#e7f3a2b1"
+            self._expert_map.setdefault(e.name, e)       # expert display name
             self._expert_map.setdefault(e.title, e)      # "创意专家" (first-come wins)
             if e.tag:
                 self._expert_map.setdefault(e.tag, e)    # "creative" (first-come wins)

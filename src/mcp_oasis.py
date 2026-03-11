@@ -113,10 +113,10 @@ async def list_oasis_experts(username: str = "") -> str:
 
             lines.append(
                 "\n💡 在 schedule_yaml 中使用 expert 的 tag 来指定参与者。"
-                "\n   四种格式:"
+                "\n   三种格式:"
                 "\n   • \"tag#temp#N\"         — 直连LLM，无状态"
-                "\n   • \"tag#oasis#随机ID\"   — 有状态session，跨轮记忆"
-                "\n   • \"标题#session_id\"    — 普通agent session"
+                "\n   • \"tag#oasis#name\"     — 内部session agent，按name查找"
+                "\n   • \"#oasis#name\"        — 内部session agent（无tag）"
                 "\n   • \"tag#ext#id\"         — 外部API（DeepSeek/GPT-4等）"
             )
             return "\n".join(lines)
@@ -270,14 +270,10 @@ async def list_oasis_sessions(username: str = "") -> str:
     """
     List all oasis-managed expert sessions for the current user.
 
-    Oasis sessions are identified by "#oasis#" in their session_id
-    (e.g. "creative#oasis#ab12cd34", where "creative" is the expert tag).
-    They live in the normal Agent checkpoint DB and are auto-created
-    when first used in a discussion.
-
-    No separate storage or pre-creation is needed.  Just use session_ids
-    in "tag#oasis#<random>" format in your schedule_yaml expert names.
-    Append "#new" to force a brand-new session (ID replaced with random UUID).
+    Internal session agents are configured in {user_id}_agent.json with
+    name→session_id mappings. In YAML, use "tag#oasis#name" or "#oasis#name"
+    format — the engine resolves the name to the actual session_id.
+    Append "#new" to force a brand-new session (resolved ID replaced with random UUID).
 
     Args:
         username: (auto-injected) current user identity; do NOT set manually
@@ -298,8 +294,9 @@ async def list_oasis_sessions(username: str = "") -> str:
             if not sessions:
                 return (
                     "📭 暂无 oasis 专家 session。\n\n"
-                    "💡 无需预创建。在 schedule_yaml 中使用\n"
-                    "   \"tag#oasis#随机ID\" 格式的名称即可，首次使用时自动创建。\n"
+                    "💡 在 schedule_yaml 中使用\n"
+                    "   \"tag#oasis#name\" 或 \"#oasis#name\" 格式即可。\n"
+                    "   agent name 会自动映射到对应的 session。\n"
                     "   加 \"#new\" 后缀可确保创建全新 session。"
                 )
 
@@ -355,38 +352,32 @@ async def post_to_oasis(
     If both are provided, schedule_file takes priority (file content is used, schedule_yaml is ignored).
     If the user already has a saved YAML workflow file, just use schedule_file — no need to write schedule_yaml again.
 
-    **Four Agent Types** (name must contain '#'; engine dispatches by format):
+    **Three Agent Types** (name must contain '#'; engine dispatches by format):
 
       Type 1 — Direct LLM (stateless, fast):
         "tag#temp#N"            → ExpertAgent. Stateless single-shot LLM call per round.
                                   tag maps to preset expert name/persona; N is instance number.
                                   Example: "creative#temp#1", "critical#temp#2"
 
-      Type 2 — Oasis Session (stateful, has memory):
-        "tag#oasis#id"          → SessionExpert (oasis-managed). Stateful bot session with
-                                  conversation memory across rounds. tag maps to preset persona
-                                  (injected as system prompt on first round). id can be any string;
-                                  new IDs auto-create sessions on first use.
-                                  Example: "data#oasis#analysis01", "synthesis#oasis#abc123"
+      Type 2 — Internal Session Agent (stateful, has memory):
+        "tag#oasis#name"        → SessionExpert. Resolves agent name to session_id via
+                                  internal agent JSON ({user_id}_agent.json). tag enables
+                                  persona injection from presets.
+                                  Example: "test#oasis#test1", "creative#oasis#my_agent"
+        "#oasis#name"           → SessionExpert (no tag). Same name→session lookup,
+                                  no persona injection unless auto-detected from JSON.
+                                  Example: "#oasis#test1"
 
-      Type 3 — Regular Agent Session (your existing bot):
-        "Title#session_id"      → SessionExpert (regular). Connects to an existing agent session.
-                                  No identity injection — the session's own system prompt defines it.
-                                  Useful for bringing personal bot sessions into discussions.
-                                  Example: "助手#default", "Coder#my-project"
-
-      Type 4 — External API (DeepSeek, GPT-4, Ollama, etc):
+      Type 3 — External API (DeepSeek, GPT-4, Ollama, etc):
         "tag#ext#id"            → ExternalExpert. Calls any external OpenAI-compatible API directly.
                                   Does NOT go through the local agent. External service assumed stateful.
                                   Supports custom headers via YAML `headers` field.
                                   Example: "deepseek#ext#ds1"
 
-    Session ID conventions:
-      - New IDs auto-create sessions on first use (no pre-creation needed).
-      - Append "#new" to force a brand-new session (ID replaced with random UUID):
-          "creative#oasis#ab12#new"  → "#new" stripped, ID replaced with UUID
-          "助手#my_session#new"      → same treatment
-      - Oasis sessions identified by "#oasis#" in session_id, stored in Agent checkpoint DB.
+    Session conventions:
+      - Agent names are resolved to session_ids via internal agent JSON.
+      - Append "#new" to force a brand-new session (resolved session_id replaced with random UUID):
+          "tag#oasis#name#new"  → "#new" stripped, resolved session_id replaced with UUID
 
     For simple all-parallel with all preset experts, use:
       version: 1
@@ -820,10 +811,10 @@ def _parse_expert_name(raw: str) -> dict:
 
     Formats:
       tag#temp#N         → expert, instance=N
-      tag#oasis#xxx      → expert (bot session)
+      tag#oasis#new      → expert (stateful, auto-create session)
+      tag#oasis#<name>   → session_agent (name→session lookup, tag→persona)
+      #oasis#<name>      → session_agent (name→session lookup, no tag)
       tag#ext#id         → external (external API agent)
-      Title#session_id   → session_agent
-      Title#sid#N         → session_agent, instance=N
     """
     parts = raw.split("#")
     tag = parts[0]
@@ -841,13 +832,29 @@ def _parse_expert_name(raw: str) -> dict:
         }
 
     if len(parts) >= 3 and parts[1] == "oasis":
+        oasis_val = parts[2]
+        # "tag#oasis#new" → stateful expert (auto-create new session)
+        if oasis_val == "new":
+            return {
+                "type": "expert",
+                "tag": tag,
+                "name": _TAG_NAMES.get(tag, tag),
+                "emoji": _TAG_EMOJI.get(tag, "⭐"),
+                "temperature": 0.5,
+                "instance": 1,
+                "session_id": "",
+                "stateful": True,
+            }
+        # "tag#oasis#<name>" or "#oasis#<name>" → session_agent (name-based)
+        inst = int(parts[3]) if len(parts) >= 4 and parts[3].isdigit() else 1
         return {
-            "type": "expert",
-            "tag": tag,
-            "name": _TAG_NAMES.get(tag, tag),
-            "emoji": _TAG_EMOJI.get(tag, "⭐"),
+            "type": "session_agent",
+            "tag": tag or "",
+            "name": oasis_val,
+            "agent_name": oasis_val,
+            "emoji": "💬",
             "temperature": 0.5,
-            "instance": 1,
+            "instance": inst,
             "session_id": "",
         }
 
@@ -876,17 +883,15 @@ def _parse_expert_name(raw: str) -> dict:
             "ext_id": ext_id,
         }
 
-    # session_agent: Title#session_id or Title#session_id#N
-    sid = parts[1] if len(parts) >= 2 else ""
-    inst = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else 1
+    # Unrecognized format — treat as unknown expert
     return {
-        "type": "session_agent",
-        "tag": "session",
-        "name": tag,
-        "emoji": "🤖",
-        "temperature": 0.7,
-        "instance": inst,
-        "session_id": sid,
+        "type": "expert",
+        "tag": tag or "custom",
+        "name": tag or raw,
+        "emoji": "❓",
+        "temperature": 0.5,
+        "instance": 1,
+        "session_id": "",
     }
 
 

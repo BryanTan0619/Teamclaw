@@ -188,12 +188,12 @@ def _node_yaml_name(node: dict) -> str:
 
     For expert nodes:
       - stateful=False (default) → "tag#temp#<instance>" (stateless ExpertAgent)
-      - stateful=True            → "tag#oasis#new"       (stateful SessionExpert)
+      - stateful=True            → "tag#oasis#new"       (stateful SessionExpert, auto-create)
     For external nodes:
       - "tag#ext#<ext_id>"  (external API agent)
     For session_agent nodes:
-      - "title#session_id#<instance>" when instance > 1 (multiple uses of same session)
-      - "title#session_id"            when instance == 1
+      - with tag:  "tag#oasis#<agent_name>"   (tag enables persona lookup)
+      - no tag:    "#oasis#<agent_name>"      (name→session lookup, engine resolves)
     """
     inst = node.get("instance", 1)
     node_type = node.get("type", "expert")
@@ -204,19 +204,20 @@ def _node_yaml_name(node: dict) -> str:
         return f"{tag}#ext#{ext_id}"
 
     if node_type == "session_agent":
-        title = node.get("name", "Agent")[:7]
+        agent_name = node.get("agent_name") or node.get("name", "Agent")
+        tag = node.get("tag", "")
         sid = node.get("session_id", "")
-        if sid:
-            # Oasis sessions already have the format "tag#oasis#id",
-            # so don't prepend title to avoid breaking tag resolution.
-            if "#oasis#" in sid:
-                if inst > 1:
-                    return f"{sid}#{inst}"
-                return sid
+        # Unified format: all session agents use #oasis#<name>
+        # tag#oasis#name (tag enables persona lookup)
+        # #oasis#name    (no tag, just name → session lookup by engine)
+        if tag and tag not in ("session", ""):
             if inst > 1:
-                return f"{title}#{sid}#{inst}"
-            return f"{title}#{sid}"
-        return title
+                return f"{tag}#oasis#{agent_name}#{inst}"
+            return f"{tag}#oasis#{agent_name}"
+        else:
+            if inst > 1:
+                return f"#oasis#{agent_name}#{inst}"
+            return f"#oasis#{agent_name}"
 
     tag = node.get("tag", "custom")
     # Per-node stateful flag: if set, use stateful session mode
@@ -685,7 +686,8 @@ plan:
   - expert: "tag#temp#1"          # Preset expert instance 1 (stateless, uses tag)
   - expert: "tag#temp#2"          # Same expert, 2nd instance
   - expert: "tag#oasis#new"       # Preset expert (stateful session, auto-create)
-  - expert: "Title#session_id"    # Existing session agent (with its own tools & memory)
+  - expert: "tag#oasis#name"      # Internal session agent by name (tag→persona lookup)
+  - expert: "#oasis#name"         # Internal session agent by name (no tag)
   - parallel:                     # Multiple experts speak simultaneously
       - "creative#temp#1"
       - "Title#session_id"
@@ -736,9 +738,8 @@ plan:
 ## Expert Name Formats
 1. `tag#temp#N` — Preset expert instance N (stateless), e.g. "creative#temp#1", "creative#temp#2" (same expert used twice)
 2. `tag#oasis#new` — Preset expert (stateful session, auto-creates new session), use when the individual node has stateful=true
-3. `Title#session_id` — Existing session agent, referenced by actual session_id, has its own system prompt, tools & memory
-4. `Title#session_id#N` — Same session agent used multiple times (N>1)
-
+3. `tag#oasis#name` — Internal session agent by name (tag enables persona lookup), e.g. "test#oasis#test1"
+4. `#oasis#name` — Internal session agent by name (no tag), e.g. "#oasis#test1"
 ## Available Step Types
 1. `expert: "Name"` — Single expert speaks in order
 2. `parallel: ["A", "B"]` — Multiple experts speak simultaneously (linear mode only)
