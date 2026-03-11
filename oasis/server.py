@@ -196,6 +196,7 @@ async def create_topic(req: CreateTopicRequest):
         user_id=req.user_id,
         early_stop=req.early_stop,
         discussion=req.discussion,
+        team=req.team or "",
     )
     engine.callback_url = req.callback_url
     engine.callback_session_id = req.callback_session_id

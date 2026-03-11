@@ -1384,26 +1384,31 @@ def proxy_tunnel_stop():
 # ------------------------------------------------------------------
 # Internal Agent CRUD  — per-user agent list stored as JSON
 # Path: data/user_files/internalagent/{user_id}_agent.json
+#   or: data/user_files/{user_id}/teams/{team}/{user_id}_agent.json  (team mode)
 # Structure: [ { "session": "<id>", "meta": { ... } }, ... ]
 # ------------------------------------------------------------------
 
-def _ia_path(user_id: str) -> str:
-    """Return the JSON file path for a user's internal-agent list."""
+def _ia_path(user_id: str, team: str = "") -> str:
+    """Return the JSON file path for a user's internal-agent list.
+    If team is specified, use the team-scoped path under the user's folder.
+    """
+    if team:
+        return os.path.join(root_dir, "data", "user_files", user_id, "teams", team, f"{user_id}_agent.json")
     return os.path.join(root_dir, "data", "user_files", "internalagent", f"{user_id}_agent.json")
 
 
-def _ia_load(user_id: str) -> list:
+def _ia_load(user_id: str, team: str = "") -> list:
     """Load internal-agent list; return [] if file missing."""
-    p = _ia_path(user_id)
+    p = _ia_path(user_id, team)
     if not os.path.isfile(p):
         return []
     with open(p, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def _ia_save(user_id: str, data: list):
+def _ia_save(user_id: str, data: list, team: str = ""):
     """Persist internal-agent list to disk."""
-    p = _ia_path(user_id)
+    p = _ia_path(user_id, team)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     with open(p, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -1415,28 +1420,31 @@ def ia_list():
     user_id = session.get("user_id")
     if not user_id:
         return jsonify({"error": "未登录"}), 401
-    return jsonify({"status": "success", "agents": _ia_load(user_id)})
+    team = request.args.get("team", "")
+    return jsonify({"status": "success", "agents": _ia_load(user_id, team)})
 
 
 @app.route("/internal_agents", methods=["POST"])
 def ia_add():
     """Add a new internal agent entry.
     Body: { "session": "<id>", "meta": { ... optional ... } }
+    Query: ?team=<name>  (optional, for team-scoped storage)
     """
     user_id = session.get("user_id")
     if not user_id:
         return jsonify({"error": "未登录"}), 401
+    team = request.args.get("team", "")
     body = request.get_json(force=True)
     sid = body.get("session")
     if not sid:
         return jsonify({"error": "missing required field: session"}), 400
-    agents = _ia_load(user_id)
+    agents = _ia_load(user_id, team)
     # Prevent duplicate session
     if any(a["session"] == sid for a in agents):
         return jsonify({"error": f"session '{sid}' already exists"}), 409
     entry = {"session": sid, "meta": body.get("meta", {})}
     agents.append(entry)
-    _ia_save(user_id, agents)
+    _ia_save(user_id, agents, team)
     return jsonify({"status": "success", "agent": entry})
 
 
@@ -1448,15 +1456,16 @@ def ia_update(sid):
     user_id = session.get("user_id")
     if not user_id:
         return jsonify({"error": "未登录"}), 401
+    team = request.args.get("team", "")
     body = request.get_json(force=True)
-    agents = _ia_load(user_id)
+    agents = _ia_load(user_id, team)
     for a in agents:
         if a["session"] == sid:
             new_meta = body.get("meta", {})
             if not isinstance(a.get("meta"), dict):
                 a["meta"] = {}
             a["meta"].update(new_meta)
-            _ia_save(user_id, agents)
+            _ia_save(user_id, agents, team)
             return jsonify({"status": "success", "agent": a})
     return jsonify({"error": "not found"}), 404
 
@@ -1467,12 +1476,13 @@ def ia_delete(sid):
     user_id = session.get("user_id")
     if not user_id:
         return jsonify({"error": "未登录"}), 401
-    agents = _ia_load(user_id)
+    team = request.args.get("team", "")
+    agents = _ia_load(user_id, team)
     before = len(agents)
     agents = [a for a in agents if a["session"] != sid]
     if len(agents) == before:
         return jsonify({"error": "not found"}), 404
-    _ia_save(user_id, agents)
+    _ia_save(user_id, agents, team)
     return jsonify({"status": "success", "deleted": sid})
 
 

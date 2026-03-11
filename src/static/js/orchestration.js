@@ -13,11 +13,38 @@ const orch = {
     spaceDown: false,    // 空格键按下状态
     contextMenu: null,
     sessionStatuses: {},
+    // Team mode
+    teamEnabled: false,
+    teamName: '',
     // Zoom & pan state
     zoom: 1,
     panX: 0,
     panY: 0,
 };
+
+// ── Team mode helpers ──
+function orchTeamToggle() {
+    const cb = document.getElementById('orch-team-enabled');
+    const inp = document.getElementById('orch-team-name');
+    orch.teamEnabled = cb.checked;
+    inp.style.display = cb.checked ? '' : 'none';
+    inp.disabled = !cb.checked;
+    if (!cb.checked) { orch.teamName = ''; inp.value = ''; }
+    else { orch.teamName = inp.value.trim(); }
+    // Reload agents with new scope
+    orchLoadSessionAgents();
+    orchLoadOpenClawSessions();
+}
+function orchTeamNameChanged() {
+    const inp = document.getElementById('orch-team-name');
+    orch.teamName = inp.value.trim();
+    orchLoadSessionAgents();
+    orchLoadOpenClawSessions();
+}
+function _orchTeamQuery() {
+    // Returns query string part for team, e.g. '?team=myteam' or ''
+    return (orch.teamEnabled && orch.teamName) ? '?team=' + encodeURIComponent(orch.teamName) : '';
+}
 
 // ── Zoom / Pan helpers ──
 function orchApplyTransform() {
@@ -278,7 +305,7 @@ function _orchCreateExpertCard(exp, isCustom) {
 // Helper: load internal agent meta as a map { session_id: meta }
 async function _orchLoadAgentMetaMap() {
     try {
-        const resp = await fetch('/internal_agents');
+        const resp = await fetch('/internal_agents' + _orchTeamQuery());
         const data = await resp.json();
         const map = {};
         if (data.agents) {
@@ -350,7 +377,7 @@ function orchShowAddInternalAgentModal() {
         // Generate a new session id
         const newSid = Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
         try {
-            await fetch('/internal_agents', {
+            await fetch('/internal_agents' + _orchTeamQuery(), {
                 method: 'POST', headers: {'Content-Type':'application/json'},
                 body: JSON.stringify({ session: newSid, meta: { name, tag: tag || '' } })
             });
@@ -441,8 +468,18 @@ async function orchLoadOpenClawSessions() {
             list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#d1d5db;text-align:center;">No OpenClaw agents</div>';
             return;
         }
+        // Filter by team prefix when team mode is active
+        let agents = data.agents;
+        if (orch.teamEnabled && orch.teamName) {
+            const prefix = orch.teamName.toLowerCase() + '_';
+            agents = agents.filter(a => (a.name || '').toLowerCase().startsWith(prefix));
+            if (agents.length === 0) {
+                list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#d1d5db;text-align:center;">No agents with prefix \'' + escapeHtml(orch.teamName) + '_\'</div>';
+                return;
+            }
+        }
         const openclawUrl = data.openclaw_api_url || '';
-        for (const a of data.agents) {
+        for (const a of agents) {
             const card = document.createElement('div');
             card.className = 'orch-expert-card';
             card.draggable = true;
@@ -1284,9 +1321,12 @@ function orchShowAddOpenClawModal() {
             <div style="display:flex;flex-direction:column;gap:10px;margin:12px 0;">
                 <label style="font-size:11px;font-weight:600;color:#374151;">
                     ${t('orch_openclaw_agent_name')}
-                    <input id="orch-oc-name" type="text" placeholder="e.g. work, research, coding"
-                           style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;"
-                           pattern="[a-zA-Z0-9_-]+" title="Only alphanumeric, dash, underscore">
+                    <div style="display:flex;align-items:center;gap:0;margin-top:2px;">
+                        ${(orch.teamEnabled && orch.teamName) ? '<span style="padding:6px 4px 6px 8px;border:1px solid #d1d5db;border-right:none;border-radius:6px 0 0 6px;font-size:12px;background:#f3f4f6;color:#6b7280;white-space:nowrap;">' + escapeHtml(orch.teamName) + '_</span>' : ''}
+                        <input id="orch-oc-name" type="text" placeholder="e.g. work, research, coding"
+                               style="width:100%;padding:6px 8px;border:1px solid #d1d5db;${(orch.teamEnabled && orch.teamName) ? 'border-radius:0 6px 6px 0;' : 'border-radius:6px;'}font-size:12px;"
+                               pattern="[a-zA-Z0-9_-]+" title="Only alphanumeric, dash, underscore">
+                    </div>
                 </label>
                 <label style="font-size:11px;font-weight:600;color:#374151;">
                     Workspace ${t('orch_openclaw_ws_path')}
@@ -1382,6 +1422,10 @@ function orchShowAddOpenClawModal() {
     overlay.querySelector('#orch-oc-create').addEventListener('click', async () => {
         const name = nameInp.value.trim();
         const workspace = wsInp.value.trim();
+        // Prepend team prefix if team mode is active
+        if (orch.teamEnabled && orch.teamName) {
+            name = orch.teamName + '_' + name;
+        }
         if (!name) { orchToast(t('orch_openclaw_name_required')); return; }
         if (!/^[a-zA-Z0-9_-]+$/.test(name)) { orchToast(t('orch_openclaw_name_invalid')); return; }
         if (!workspace) { orchToast(t('orch_openclaw_ws_required')); return; }

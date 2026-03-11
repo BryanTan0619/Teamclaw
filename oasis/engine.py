@@ -69,19 +69,29 @@ from oasis.scheduler import (
 # Maximum total node executions across all super-steps (safety limit)
 _MAX_TOTAL_NODE_EXECS = 500
 
-# Path to internal agent config directory
+# Path to internal agent config directory (default, non-team)
 _INTERNAL_AGENT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "data", "user_files", "internalagent"
 )
+# Project root for team-scoped paths
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 
 
-def _load_internal_agents(user_id: str) -> list[dict]:
+def _load_internal_agents(user_id: str, team: str = "") -> list[dict]:
     """Load the internal-agent JSON list for a user.
+
+    If team is specified, load from the team-scoped path:
+      data/user_files/{user_id}/teams/{team}/{user_id}_agent.json
+    Otherwise load from:
+      data/user_files/internalagent/{user_id}_agent.json
 
     Returns list of {"session": "<id>", "meta": {"name": ..., "tag": ...}} entries.
     Returns [] if file missing or unreadable.
     """
-    p = os.path.join(_INTERNAL_AGENT_DIR, f"{user_id}_agent.json")
+    if team:
+        p = os.path.join(_PROJECT_ROOT, "data", "user_files", user_id, "teams", team, f"{user_id}_agent.json")
+    else:
+        p = os.path.join(_INTERNAL_AGENT_DIR, f"{user_id}_agent.json")
     if not os.path.isfile(p):
         return []
     try:
@@ -164,11 +174,13 @@ class DiscussionEngine:
         user_id: str = "anonymous",
         early_stop: bool = False,
         discussion: bool | None = None,
+        team: str = "",
     ):
         self.forum = forum
         self._cancelled = False
         self._early_stop = early_stop
         self._discussion_override = discussion  # API-level override (None = use YAML)
+        self._team = team  # Team name for scoped agent storage
 
         # ── Step 1: Parse schedule (required) ──
         self.schedule: Schedule | None = None
@@ -196,7 +208,7 @@ class DiscussionEngine:
 
         yaml_names = extract_expert_names(self.schedule)
         ext_configs = collect_external_configs(self.schedule)
-        internal_agents = _load_internal_agents(user_id)  # for name→session lookup
+        internal_agents = _load_internal_agents(user_id, self._team)  # for name→session lookup
         seen: set[str] = set()
         # Map YAML original names → expert (built during pool construction)
         yaml_to_expert: dict[str, ExpertAgent | SessionExpert | ExternalExpert] = {}

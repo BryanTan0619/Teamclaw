@@ -41,6 +41,7 @@ class CreateTopicRequest(BaseModel):
     # Callback: when discussion concludes, POST result to this URL via /system_trigger
     callback_url: Optional[str] = None
     callback_session_id: Optional[str] = None
+    team: Optional[str] = None  # Team name for scoped agent storage
 
 
 class PostInfo(BaseModel):
