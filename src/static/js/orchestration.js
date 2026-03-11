@@ -303,7 +303,10 @@ function orchShowAddInternalAgentModal() {
                     <input id="orch-ia-name" type="text" placeholder="my_agent" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;">
                 </label>
                 <label style="font-size:11px;font-weight:600;color:#374151;">${t('orch_ia_tag')}
-                    <input id="orch-ia-tag" type="text" placeholder="${t('orch_ia_tag_placeholder')}" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;">
+                    <select id="orch-ia-tag" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;background:white;">
+                        <option value="">${t('orch_ia_tag_placeholder')}</option>
+                        ${[...new Set(orch.experts.map(e => e.tag).filter(Boolean))].map(tag => `<option value="${escapeHtml(tag)}">${escapeHtml(tag)}</option>`).join('')}
+                    </select>
                 </label>
                 <div id="orch-ia-drop-zone" style="border:2px dashed #d1d5db;border-radius:8px;padding:12px;text-align:center;font-size:11px;color:#9ca3af;cursor:default;transition:all .15s;">
                     📦 ${t('orch_ia_tag_placeholder')}
@@ -495,7 +498,12 @@ function orchShowAddExpertModal() {
             <h3>${t('orch_add_expert_title')}</h3>
             <div style="display:flex;flex-direction:column;gap:8px;margin:10px 0;">
                 <label style="font-size:11px;font-weight:600;color:#374151;">${t('orch_label_name')} <input id="orch-ce-name" type="text" placeholder="${t('orch_ph_name')}" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;"></label>
-                <label style="font-size:11px;font-weight:600;color:#374151;">${t('orch_label_tag')} <input id="orch-ce-tag" type="text" placeholder="${t('orch_ph_tag')}" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;"></label>
+                <label style="font-size:11px;font-weight:600;color:#374151;">${t('orch_label_tag')}
+                    <select id="orch-ce-tag" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;background:white;">
+                        <option value="">${t('orch_ph_tag')}</option>
+                        ${[...new Set(orch.experts.map(e => e.tag).filter(Boolean))].map(tag => `<option value="${escapeHtml(tag)}">${escapeHtml(tag)}</option>`).join('')}
+                    </select>
+                </label>
                 <label style="font-size:11px;font-weight:600;color:#374151;">${t('orch_label_temp')} <input id="orch-ce-temp" type="number" value="0.7" min="0" max="2" step="0.1" style="width:80px;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;"></label>
                 <label style="font-size:11px;font-weight:600;color:#374151;">${t('orch_label_persona')}
                     <textarea id="orch-ce-persona" rows="4" placeholder="${t('orch_ph_persona')}" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;resize:vertical;"></textarea>
@@ -1476,7 +1484,9 @@ function orchNextInstance(data) {
 function orchAddNode(data, x, y) {
     const id = 'on' + orch.nid++;
     const inst = data.instance || orchNextInstance(data);
-    const node = { id, name: data.name, tag: data.tag||'custom', emoji: data.emoji||'⭐', x: Math.round(x), y: Math.round(y), type: data.type||'expert', temperature: data.temperature||0.5, author: data.author||t('orch_default_author'), content: data.content||'', session_id: data.session_id||'', source: data.source||'', instance: inst, stateful: data.stateful||false };
+    // session_agent is always stateful
+    const nodeStateful = data.type === 'session_agent' ? true : (data.stateful || false);
+    const node = { id, name: data.name, tag: data.tag||'custom', emoji: data.emoji||'⭐', x: Math.round(x), y: Math.round(y), type: data.type||'expert', temperature: data.temperature||0.5, author: data.author||t('orch_default_author'), content: data.content||'', session_id: data.session_id||'', source: data.source||'', instance: inst, stateful: nodeStateful };
     // Preserve selector node flag
     if (data.isSelector) node.isSelector = true;
     // Preserve session agent name for YAML generation
@@ -2431,7 +2441,9 @@ function orchSaveManual(nodeId) {
 // ── Instruction Edit Modal (for expert/session nodes) ──
 function orchShowInstructionModal(node) {
     const isExternalType = node.type === 'external';
-    const showStateful = !isExternalType;
+    const isTempType = node.type === 'expert';
+    // session_agent is always stateful, temp/external never need it — hide switch for all
+    const showStateful = false;
     const overlay = document.createElement('div');
     overlay.className = 'orch-modal-overlay';
     overlay.id = 'orch-instruction-modal';

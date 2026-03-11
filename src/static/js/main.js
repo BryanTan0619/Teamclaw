@@ -1325,7 +1325,7 @@ let _agentMetaCallback = null;  // resolve fn for the modal promise
 let _agentMetaMode = 'create';  // 'create' or 'edit'
 let _agentMetaSessionId = null;
 
-function openAgentMetaModal(mode, sessionId, existingMeta) {
+async function openAgentMetaModal(mode, sessionId, existingMeta) {
     _agentMetaMode = mode;
     _agentMetaSessionId = sessionId;
     const modal = document.getElementById('agent-meta-modal');
@@ -1333,7 +1333,19 @@ function openAgentMetaModal(mode, sessionId, existingMeta) {
         mode === 'edit' ? '✏️ Edit Agent Settings' : '🤖 New Agent Settings';
     document.getElementById('agent-meta-name').value = (existingMeta && existingMeta.name) || '';
     document.getElementById('agent-meta-tools').value = (existingMeta && existingMeta.tools) || '';
-    document.getElementById('agent-meta-tag').value = (existingMeta && existingMeta.tag) || '';
+    // Populate tag select options from experts list
+    const tagSelect = document.getElementById('agent-meta-tag');
+    const currentTag = (existingMeta && existingMeta.tag) || '';
+    try {
+        const r = await fetch('/proxy_visual/experts');
+        const experts = await r.json();
+        const tags = [...new Set(experts.map(e => e.tag).filter(Boolean))];
+        tagSelect.innerHTML = '<option value="">(None)</option>' +
+            tags.map(t => `<option value="${t}">${t}</option>`).join('');
+    } catch (e) {
+        console.warn('Failed to load expert tags', e);
+    }
+    tagSelect.value = currentTag;
     modal.style.display = 'flex';
     document.getElementById('agent-meta-name').focus();
     return new Promise(resolve => { _agentMetaCallback = resolve; });
