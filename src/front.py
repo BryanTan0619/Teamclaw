@@ -575,14 +575,14 @@ def proxy_openclaw_agent_bind():
 # Team OpenClaw Snapshot — export/restore agent configs in team folder
 # ------------------------------------------------------------------
 
-def _team_snapshot_path(user_id: str, team: str) -> str:
-    """Return the path to the team's openclaw_agents.json snapshot file."""
+def _team_openclaw_agents_path(user_id: str, team: str) -> str:
+    """Return the path to the team's openclaw_agents.json file."""
     return os.path.join(root_dir, "data", "user_files", user_id, "teams", team, "openclaw_agents.json")
 
 
-def _team_snapshot_load(user_id: str, team: str) -> dict:
-    """Load the team's openclaw agents snapshot; return {} if missing."""
-    p = _team_snapshot_path(user_id, team)
+def _team_openclaw_agents_load(user_id: str, team: str) -> dict:
+    """Load the team's openclaw agents; return {} if missing."""
+    p = _team_openclaw_agents_path(user_id, team)
     if not os.path.isfile(p):
         return {}
     try:
@@ -592,9 +592,9 @@ def _team_snapshot_load(user_id: str, team: str) -> dict:
         return {}
 
 
-def _team_snapshot_save(user_id: str, team: str, data: dict):
-    """Save the team's openclaw agents snapshot to disk."""
-    p = _team_snapshot_path(user_id, team)
+def _team_openclaw_agents_save(user_id: str, team: str, data: dict):
+    """Save the team's openclaw agents to disk."""
+    p = _team_openclaw_agents_path(user_id, team)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     with open(p, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -612,7 +612,7 @@ def team_openclaw_snapshot_get():
     team = request.args.get("team", "")
     if not team:
         return jsonify({"ok": False, "error": "team is required"}), 400
-    data = _team_snapshot_load(user_id, team)
+    data = _team_openclaw_agents_load(user_id, team)
     return jsonify({"ok": True, "agents": data})
 
 
@@ -648,12 +648,12 @@ def team_openclaw_snapshot_export():
         return jsonify({"ok": False, "error": str(e)}), 500
 
     # Save to team snapshot file
-    data = _team_snapshot_load(user_id, team)
+    data = _openclaw_agents_load(user_id, team)
     data[short_name] = {
         "config": snapshot.get("config", {}),
         "workspace_files": snapshot.get("workspace_files", {}),
     }
-    _team_snapshot_save(user_id, team, data)
+    _openclaw_agents_save(user_id, team, data)
 
     file_count = len(snapshot.get("workspace_files", {}))
     return jsonify({
@@ -686,7 +686,7 @@ def team_openclaw_snapshot_restore():
         target_name = team + "_" + short_name
 
     # Load snapshot
-    data = _team_snapshot_load(user_id, team)
+    data = _openclaw_agents_load(user_id, team)
     agent_snapshot = data.get(short_name)
     if not agent_snapshot:
         return jsonify({"ok": False, "error": f"No snapshot found for '{short_name}' in team '{team}'"}), 404
@@ -738,7 +738,7 @@ def team_openclaw_snapshot_export_all():
     if not team_agents:
         return jsonify({"ok": True, "exported": 0, "message": f"No agents with prefix '{prefix}'"}), 200
 
-    data = _team_snapshot_load(user_id, team)
+    data = _openclaw_agents_load(user_id, team)
     exported = 0
     errors = []
 
@@ -763,7 +763,7 @@ def team_openclaw_snapshot_export_all():
         except Exception as e:
             errors.append(f"{full_name}: {e}")
 
-    _team_snapshot_save(user_id, team, data)
+    _openclaw_agents_save(user_id, team, data)
 
     return jsonify({
         "ok": True,
@@ -789,7 +789,7 @@ def team_openclaw_snapshot_restore_all():
     if not team:
         return jsonify({"ok": False, "error": "team is required"}), 400
 
-    data = _team_snapshot_load(user_id, team)
+    data = _openclaw_agents_load(user_id, team)
     if not data:
         return jsonify({"ok": True, "restored": 0, "message": "No snapshots found"}), 200
 
@@ -1637,35 +1637,102 @@ def proxy_tunnel_stop():
 
 # ------------------------------------------------------------------
 # Internal Agent CRUD  — per-user agent list stored as JSON
-# Path: data/user_files/internalagent/oasis_agents.json
-#   or: data/user_files/{user_id}/teams/{team}/oasis_agents.json  (team mode)
-# Structure: [ { "session": "<id>", "meta": { ... } }, ... ]
+# We maintain two files:
+#  1. oasis_agents.json: {"agents": [{"name": "...", "tag": "...", ...}]}
+#  2. oasis_sessions.json: {"agent_name": "session_id", ...}
+# Paths:
+#   - Team mode: data/user_files/{user_id}/teams/{team}/oasis_*.json
+#   - Public mode: data/user_files/internalagent/oasis_*.json
+# Frontend expects: {"agents": [{"session": "sid", "meta": {...}}, ...]}
 # ------------------------------------------------------------------
 
-def _ia_path(user_id: str, team: str = "") -> str:
-    """Return the JSON file path for a user's internal-agent list.
-    If team is specified, use the team-scoped path under the user's folder.
-    """
+def _ia_dir(user_id: str, team: str = "") -> str:
+    """Return the directory path for internal agent files."""
     if team:
-        return os.path.join(root_dir, "data", "user_files", user_id, "teams", team, "oasis_agents.json")
-    return os.path.join(root_dir, "data", "user_files", "internalagent", "oasis_agents.json")
+        return os.path.join(root_dir, "data", "user_files", user_id, "teams", team)
+    return os.path.join(root_dir, "data", "user_files", "internalagent")
+
+
+def _ia_agents_path(user_id: str, team: str = "") -> str:
+    """Return the oasis_agents.json file path."""
+    return os.path.join(_ia_dir(user_id, team), "oasis_agents.json")
+
+
+def _ia_sessions_path(user_id: str, team: str = "") -> str:
+    """Return the oasis_sessions.json file path."""
+    return os.path.join(_ia_dir(user_id, team), "oasis_sessions.json")
 
 
 def _ia_load(user_id: str, team: str = "") -> list:
-    """Load internal-agent list; return [] if file missing."""
-    p = _ia_path(user_id, team)
-    if not os.path.isfile(p):
-        return []
-    with open(p, "r", encoding="utf-8") as f:
-        return json.load(f)
+    """Load and merge internal agents from both files.
+    Returns: [{"session": "sid", "meta": {"name": "...", "tag": "...", ...}}, ...]
+    """
+    # Load agents from oasis_agents.json
+    agents_path = _ia_agents_path(user_id, team)
+    agents_list = []
+    name_to_meta = {}
+    if os.path.isfile(agents_path):
+        with open(agents_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, dict) and "agents" in data and isinstance(data["agents"], list):
+                agents_list = data["agents"]
+            elif isinstance(data, list):
+                agents_list = data
+        # Build name -> meta mapping
+        for a in agents_list:
+            if isinstance(a, dict) and "name" in a:
+                name_to_meta[a["name"]] = a
+    
+    # Load name -> session_id mapping from oasis_sessions.json
+    sessions_path = _ia_sessions_path(user_id, team)
+    name_to_session = {}
+    if os.path.isfile(sessions_path):
+        with open(sessions_path, "r", encoding="utf-8") as f:
+            name_to_session = json.load(f)
+    
+    # Merge: build session -> meta list
+    result = []
+    for name, sid in name_to_session.items():
+        meta = name_to_meta.get(name, {})
+        # Ensure meta has at least the name field
+        if "name" not in meta:
+            meta = dict(meta)  # copy
+            meta["name"] = name
+        result.append({"session": sid, "meta": meta})
+    
+    return result
 
 
 def _ia_save(user_id: str, data: list, team: str = ""):
-    """Persist internal-agent list to disk."""
-    p = _ia_path(user_id, team)
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """Save internal agents to both files.
+    data: [{"session": "sid", "meta": {"name": "...", "tag": "...", ...}}, ...]
+    """
+    agents_path = _ia_agents_path(user_id, team)
+    sessions_path = _ia_sessions_path(user_id, team)
+    directory = _ia_dir(user_id, team)
+    
+    os.makedirs(directory, exist_ok=True)
+    
+    # Save oasis_agents.json (meta only, extract name from meta)
+    agents_list = []
+    for item in data:
+        meta = item.get("meta", {})
+        if isinstance(meta, dict):
+            agents_list.append(meta)
+    with open(agents_path, "w", encoding="utf-8") as f:
+        json.dump({"agents": agents_list}, f, ensure_ascii=False, indent=2)
+    
+    # Save oasis_sessions.json (name -> session_id mapping)
+    name_to_session = {}
+    for item in data:
+        meta = item.get("meta", {})
+        if isinstance(meta, dict):
+            name = meta.get("name")
+            sid = item.get("session")
+            if name and sid:
+                name_to_session[name] = sid
+    with open(sessions_path, "w", encoding="utf-8") as f:
+        json.dump(name_to_session, f, ensure_ascii=False, indent=2)
 
 
 @app.route("/internal_agents", methods=["GET"])
@@ -1731,13 +1798,310 @@ def ia_delete(sid):
     if not user_id:
         return jsonify({"error": "未登录"}), 401
     team = request.args.get("team", "")
+    
+    # Load current data
     agents = _ia_load(user_id, team)
-    before = len(agents)
-    agents = [a for a in agents if a["session"] != sid]
-    if len(agents) == before:
+    
+    # Find the agent to get its name
+    target_agent = None
+    for a in agents:
+        if a["session"] == sid:
+            target_agent = a
+            break
+    
+    if not target_agent:
         return jsonify({"error": "not found"}), 404
+    
+    # Remove from agents list
+    agents = [a for a in agents if a["session"] != sid]
+    
+    # Save back (will update both files)
     _ia_save(user_id, agents, team)
+    
     return jsonify({"status": "success", "deleted": sid})
+
+
+@app.route("/teams", methods=["GET"])
+def list_teams():
+    """List all team names for the current user."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+    teams_dir = os.path.join(root_dir, "data", "user_files", user_id, "teams")
+    teams = []
+    if os.path.isdir(teams_dir):
+        try:
+            teams = [d for d in os.listdir(teams_dir) 
+                    if os.path.isdir(os.path.join(teams_dir, d))]
+        except OSError:
+            pass
+    return jsonify({"status": "success", "teams": sorted(teams)})
+
+
+@app.route("/teams", methods=["POST"])
+def create_team():
+    """Create a new team folder."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+    
+    body = request.get_json(force=True)
+    team = body.get("team", "")
+    
+    if not team:
+        return jsonify({"error": "team name is required"}), 400
+    
+    # Validate team name (prevent path traversal)
+    if "/" in team or "\\" in team or team.startswith("."):
+        return jsonify({"error": "Invalid team name"}), 400
+    
+    team_dir = os.path.join(root_dir, "data", "user_files", user_id, "teams", team)
+    
+    if os.path.exists(team_dir):
+        return jsonify({"error": "Team already exists"}), 400
+    
+    try:
+        os.makedirs(team_dir, exist_ok=True)
+        return jsonify({"success": True, "message": f"Team '{team}' created"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/teams/<team_name>", methods=["DELETE"])
+def delete_team(team_name):
+    """Delete a team and all its internal agents, then remove the folder."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+    
+    # Validate team name
+    if not team_name or "/" in team_name or "\\" in team_name:
+        return jsonify({"error": "Invalid team name"}), 400
+    
+    team_dir = os.path.join(root_dir, "data", "user_files", user_id, "teams", team_name)
+    
+    if not os.path.exists(team_dir):
+        return jsonify({"error": "Team not found"}), 404
+    
+    try:
+        # Step 1: Delete all internal agents from oasis server
+        agents = _ia_load(user_id, team_name)
+        deleted_count = 0
+        errors = []
+        
+        for agent in agents:
+            sid = agent.get("session")
+            if sid:
+                try:
+                    r = requests.delete(
+                        f"{OASIS_BASE_URL}/sessions/{sid}",
+                        timeout=10
+                    )
+                    if r.status_code == 200:
+                        deleted_count += 1
+                    else:
+                        errors.append(f"Failed to delete session {sid}")
+                except Exception as e:
+                    errors.append(f"Error deleting session {sid}: {str(e)}")
+        
+        # Step 2: Delete the team folder
+        import shutil
+        shutil.rmtree(team_dir)
+        
+        return jsonify({
+            "success": True,
+            "message": f"Team '{team_name}' deleted",
+            "deleted_agents": deleted_count,
+            "errors": errors
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/teams/snapshot/download", methods=["POST"])
+def download_team_snapshot():
+    """Download a compressed snapshot of the team's data.
+    Includes: oasis_agents.json, oasis_experts.json, 
+             openclaw_agents.json, and all .yaml files.
+    Note: oasis_sessions.json is excluded as it contains private session mappings.
+    """
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+    
+    body = request.get_json(force=True)
+    team = body.get("team", "")
+    
+    if not team:
+        return jsonify({"error": "team is required"}), 400
+    
+    team_dir = os.path.join(root_dir, "data", "user_files", user_id, "teams", team)
+    
+    if not os.path.exists(team_dir):
+        return jsonify({"error": "Team not found"}), 404
+    
+    import zipfile
+    import io
+    from datetime import datetime
+    
+    try:
+        # Create a zip file in memory
+        zip_buffer = io.BytesIO()
+        
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            # Add internal agent JSON files (excluding private session mappings)
+            json_files = [
+                "oasis_agents.json",
+                "oasis_experts.json",
+                "openclaw_agents.json"
+            ]
+            # Note: oasis_sessions.json is NOT included as it contains private session mappings
+            
+            for json_file in json_files:
+                file_path = os.path.join(team_dir, json_file)
+                if os.path.exists(file_path):
+                    zipf.write(file_path, json_file)
+            
+            # Add all .yaml files
+            for root, dirs, files in os.walk(team_dir):
+                for file in files:
+                    if file.endswith(('.yaml', '.yml')):
+                        file_path = os.path.join(root, file)
+                        # Use relative path inside zip
+                        rel_path = os.path.relpath(file_path, team_dir)
+                        zipf.write(file_path, rel_path)
+        
+        zip_buffer.seek(0)
+        
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"team_{team}_snapshot_{timestamp}.zip"
+        
+        return Response(
+            zip_buffer.read(),
+            mimetype='application/zip',
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"'
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/teams/snapshot/upload", methods=["POST"])
+def upload_team_snapshot():
+    """Upload and restore a team snapshot from a zip file.
+    Extracts to the team folder and recreates internal agents.
+    """
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "未登录"}), 401
+    
+    # Get team name from form data
+    team = request.form.get("team", "")
+    if not team:
+        return jsonify({"error": "team is required"}), 400
+    
+    # Validate team name
+    if "/" in team or "\\" in team or team.startswith("."):
+        return jsonify({"error": "Invalid team name"}), 400
+    
+    # Check for uploaded file
+    if 'file' not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No file selected"}), 400
+    
+    if not file.filename.endswith('.zip'):
+        return jsonify({"error": "File must be a .zip file"}), 400
+    
+    team_dir = os.path.join(root_dir, "data", "user_files", user_id, "teams", team)
+    
+    # Create team directory if it doesn't exist
+    os.makedirs(team_dir, exist_ok=True)
+    
+    import zipfile
+    import tempfile
+    
+    try:
+        # Save uploaded file to temp location
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as temp_file:
+            file.save(temp_file.name)
+            temp_path = temp_file.name
+        
+        # Extract zip file
+        with zipfile.ZipFile(temp_path, 'r') as zip_ref:
+            # Validate zip contents (only allow safe file types)
+            for file_info in zip_ref.infolist():
+                filename = file_info.filename
+                # Skip directories and absolute paths
+                if filename.endswith('/') or filename.startswith('/'):
+                    continue
+                # Only allow json and yaml files
+                if not (filename.endswith(('.json', '.yaml', '.yml'))):
+                    return jsonify({"error": f"Invalid file type in zip: {filename}"}), 400
+                # Extract file to team_dir (use basename to flatten structure)
+                target_path = os.path.join(team_dir, os.path.basename(filename))
+                with zip_ref.open(file_info) as source, open(target_path, 'wb') as target:
+                    target.write(source.read())
+        
+        # Clean up temp file
+        os.unlink(temp_path)
+        
+        # After extraction, recreate agents from oasis_agents.json
+        # Read agent metadata and create new session_id for each agent
+        oasis_agents_path = os.path.join(team_dir, "oasis_agents.json")
+        
+        agents_data = []  # Format: [{"session": "sid", "meta": {...}}, ...]
+        
+        if os.path.exists(oasis_agents_path):
+            with open(oasis_agents_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                agents_list = data.get("agents", []) if isinstance(data, dict) else data
+            
+            # Generate new session_id for each agent and build agents_data
+            import time, random
+            for agent_meta in agents_list:
+                if not isinstance(agent_meta, dict) or "name" not in agent_meta:
+                    continue
+                
+                # Generate session_id (same format as frontend: base36 timestamp + random)
+                # Frontend: Date.now().toString(36) + Math.random().toString(36).substr(2, 4)
+                def to_base36(n):
+                    """Convert number to base36 string (same as JavaScript's toString(36))"""
+                    if n == 0:
+                        return '0'
+                    digits = '0123456789abcdefghijklmnopqrstuvwxyz'
+                    result = ''
+                    while n > 0:
+                        result = digits[n % 36] + result
+                        n //= 36
+                    return result
+                
+                timestamp_ms = int(time.time() * 1000)
+                random_part = random.randint(0, 36**4 - 1)  # 4-digit base36 random
+                new_sid = to_base36(timestamp_ms) + to_base36(random_part).zfill(4)
+                
+                # Build entry for _ia_save
+                agents_data.append({
+                    "session": new_sid,
+                    "meta": agent_meta
+                })
+        
+        # Save agents using _ia_save (this creates oasis_sessions.json properly)
+        if agents_data:
+            _ia_save(user_id, agents_data, team)
+        
+        return jsonify({
+            "success": True,
+            "message": f"Team '{team}' snapshot uploaded and {len(agents_data)} agents restored"
+        })
+    except zipfile.BadZipFile:
+        return jsonify({"error": "Invalid zip file"}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":

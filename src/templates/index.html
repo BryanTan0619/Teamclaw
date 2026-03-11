@@ -70,12 +70,20 @@
 
         <!-- ===== 历史会话侧边栏 ===== -->
         <div id="session-sidebar" class="session-sidebar" style="display:none;">
-            <div class="p-3 border-b bg-gray-50 flex justify-between items-center flex-shrink-0">
-                <span class="text-sm font-bold text-gray-700" data-i18n="history_title">🤖 Agents</span>
+            <div class="p-3 border-b bg-gray-50 flex flex-col gap-2 flex-shrink-0">
+                <div class="flex justify-between items-center">
+                    <span class="text-sm font-bold text-gray-700" data-i18n="history_title">🤖 Agents</span>
+                    <button onclick="closeSessionSidebar()" class="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
+                </div>
+                <div class="flex items-center gap-2">
+                    <label class="text-xs text-gray-600 whitespace-nowrap">Team:</label>
+                    <select id="agent-team-select" class="flex-1 px-2 py-1 text-xs border border-gray-300 rounded" onchange="onAgentTeamChange()" onfocus="loadAgentTeams()">
+                        <option value="">(公共)</option>
+                    </select>
+                </div>
                 <div class="flex items-center gap-2">
                     <button id="toggle-oasis-sessions-btn" onclick="toggleNamedSessionsVisible()" class="text-[10px] text-gray-400 hover:text-blue-600 px-1.5 py-0.5 rounded border border-gray-200 transition-colors" title="切换 已命名/无名会话">🏷️ 切换到无名会话</button>
                     <button onclick="deleteAllSessions()" class="text-xs text-red-400 hover:text-red-600" data-i18n="delete_all">🗑️ 清空全部</button>
-                    <button onclick="closeSessionSidebar()" class="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
                 </div>
             </div>
             <div id="session-list" class="flex-1 overflow-y-auto p-2 space-y-1">
@@ -397,6 +405,11 @@
                         <input type="text" id="orch-team-name" placeholder="team name" disabled
                                style="width:100px;padding:3px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;display:none;"
                                onchange="orchTeamNameChanged()">
+                        <button onclick="orchCreateTeam()" id="orch-team-create-btn" class="orch-btn" style="display:none;font-size:11px;padding:4px 8px;" title="Create new team"><span data-i18n="orch_btn_create_team">➕ Create</span></button>
+                        <button onclick="orchDeleteTeam()" id="orch-team-delete-btn" class="orch-btn orch-btn-danger" style="display:none;font-size:11px;padding:4px 8px;" title="Delete current team"><span data-i18n="orch_btn_delete_team">🗑️ Delete</span></button>
+                        <button onclick="orchDownloadSnapshot()" id="orch-team-download-btn" class="orch-btn" style="display:none;font-size:11px;padding:4px 8px;" title="Download team snapshot"><span data-i18n="orch_btn_download_snapshot">⬇️ Snapshot</span></button>
+                        <button onclick="orchUploadSnapshotClick()" id="orch-team-upload-btn" class="orch-btn" style="display:none;font-size:11px;padding:4px 8px;" title="Upload team snapshot"><span data-i18n="orch_btn_upload_snapshot">⬆️ Upload</span></button>
+                        <input type="file" id="orch-team-snapshot-input" accept=".zip" style="display:none;" onchange="orchHandleSnapshotUpload(event)">
                     </div>
                     <div class="orch-canvas" id="orch-canvas-area">
                         <!-- 移动端 toggle 按钮 -->

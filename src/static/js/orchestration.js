@@ -29,6 +29,7 @@ function orchTeamToggle() {
     orch.teamEnabled = cb.checked;
     inp.style.display = cb.checked ? '' : 'none';
     inp.disabled = !cb.checked;
+    orchShowTeamButtons(cb.checked && inp.value.trim());
     if (!cb.checked) { orch.teamName = ''; inp.value = ''; }
     else { orch.teamName = inp.value.trim(); }
     // Reload agents with new scope
@@ -38,12 +39,143 @@ function orchTeamToggle() {
 function orchTeamNameChanged() {
     const inp = document.getElementById('orch-team-name');
     orch.teamName = inp.value.trim();
+    orchShowTeamButtons(orch.teamEnabled && orch.teamName);
     orchLoadSessionAgents();
     orchLoadOpenClawSessions();
 }
 function _orchTeamQuery() {
     // Returns query string part for team, e.g. '?team=myteam' or ''
     return (orch.teamEnabled && orch.teamName) ? '?team=' + encodeURIComponent(orch.teamName) : '';
+}
+
+// ── Team management functions ──
+function orchShowTeamButtons(show) {
+    const btns = ['orch-team-create-btn', 'orch-team-delete-btn', 'orch-team-download-btn', 'orch-team-upload-btn'];
+    btns.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = show ? '' : 'none';
+    });
+}
+
+async function orchCreateTeam() {
+    const teamName = orch.teamName.trim();
+    if (!teamName) {
+        orchToast(t('orch_toast_team_name_required') || 'Please enter team name');
+        return;
+    }
+    try {
+        const resp = await fetch('/teams', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ team: teamName })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            orchToast(t('orch_toast_team_created') || 'Team created');
+            orchLoadSessionAgents();
+            orchLoadOpenClawSessions();
+        } else {
+            orchToast(data.error || t('orch_toast_team_create_failed') || 'Failed to create team');
+        }
+    } catch (e) {
+        orchToast(t('orch_toast_network_error') || 'Network error');
+    }
+}
+
+async function orchDeleteTeam() {
+    const teamName = orch.teamName.trim();
+    if (!teamName) return;
+    if (!confirm(t('orch_confirm_delete_team') || `Delete team "${teamName}" and all its agents?`)) return;
+    try {
+        const resp = await fetch('/teams/' + encodeURIComponent(teamName), { method: 'DELETE' });
+        const data = await resp.json();
+        if (data.success) {
+            orchToast(t('orch_toast_team_deleted') || `Team deleted (${data.deleted_agents || 0} agents removed)`);
+            document.getElementById('orch-team-name').value = '';
+            orch.teamName = '';
+            orchLoadSessionAgents();
+            orchLoadOpenClawSessions();
+        } else {
+            orchToast(data.error || t('orch_toast_team_delete_failed') || 'Failed to delete team');
+        }
+    } catch (e) {
+        orchToast(t('orch_toast_network_error') || 'Network error');
+    }
+}
+
+async function orchDownloadSnapshot() {
+    const teamName = orch.teamName.trim();
+    if (!teamName) {
+        orchToast(t('orch_toast_team_name_required') || 'Please enter team name');
+        return;
+    }
+    try {
+        const resp = await fetch('/teams/snapshot/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ team: teamName })
+        });
+        if (!resp.ok) {
+            const data = await resp.json();
+            orchToast(data.error || t('orch_toast_snapshot_download_failed') || 'Failed to download snapshot');
+            return;
+        }
+        const blob = await resp.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `team_${teamName}_snapshot.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        orchToast(t('orch_toast_snapshot_downloaded') || 'Snapshot downloaded');
+    } catch (e) {
+        orchToast(t('orch_toast_network_error') || 'Network error');
+    }
+}
+
+function orchUploadSnapshotClick() {
+    document.getElementById('orch-team-snapshot-input').click();
+}
+
+async function orchHandleSnapshotUpload(event) {
+    const teamName = orch.teamName.trim();
+    if (!teamName) {
+        orchToast(t('orch_toast_team_name_required') || 'Please enter team name');
+        return;
+    }
+    const file = event.target.files[0];
+    if (!file) return;
+    if (!file.name.endsWith('.zip')) {
+        orchToast(t('orch_toast_invalid_zip') || 'Please select a .zip file');
+        event.target.value = '';
+        return;
+    }
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('team', teamName);
+    try {
+        const resp = await fetch('/teams/snapshot/upload', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await resp.json();
+        if (data.success) {
+            orchToast(t('orch_toast_snapshot_uploaded') || 'Snapshot uploaded and agents restored');
+            // Refresh team list if this is a new team
+            if (typeof loadAgentTeams === 'function') {
+                await loadAgentTeams();
+            }
+            orchLoadSessionAgents();
+            orchLoadOpenClawSessions();
+        } else {
+            orchToast(data.error || t('orch_toast_snapshot_upload_failed') || 'Failed to upload snapshot');
+        }
+    } catch (e) {
+        orchToast(t('orch_toast_network_error') || 'Network error');
+    }
+    event.target.value = '';
 }
 
 // ── Zoom / Pan helpers ──
@@ -432,7 +564,8 @@ async function orchLoadSessionAgents() {
             // Carry agent meta tag (from internal agent JSON) if available
             const meta = agentMap[s.session_id] || {};
             const agentTag = meta.tag || '';
-            card.innerHTML = `<span class="orch-emoji">🤖</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(title)}">${escapeHtml(title)}</div><div class="orch-tag" style="color:#6366f1;font-family:monospace;">${agentTag ? '🏷️' + escapeHtml(agentTag) + ' · ' : ''}#${escapeHtml(shortId)}</div></div>`;
+            // Add delete button
+            card.innerHTML = `<span class="orch-emoji">🤖</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(title)}">${escapeHtml(title)}</div><div class="orch-tag" style="color:#6366f1;font-family:monospace;">${agentTag ? '🏷️' + escapeHtml(agentTag) + ' · ' : ''}#${escapeHtml(shortId)}</div></div><button class="orch-card-delete-btn" title="Delete agent" onclick="event.stopPropagation(); orchDeleteInternalAgent('${s.session_id}')">×</button>`;
             const nodeData = {
                 type: 'session_agent',
                 name: title,
@@ -448,6 +581,27 @@ async function orchLoadSessionAgents() {
     } catch(e) {
         console.error('Load internal agents failed:', e);
         list.innerHTML = '<div style="padding:6px 10px;font-size:10px;color:#dc2626;text-align:center;">❌ ' + t('error') + '</div>';
+    }
+}
+
+// Delete internal agent from orchestration panel
+async function orchDeleteInternalAgent(sessionId) {
+    if (!confirm('Delete this internal agent?')) return;
+    try {
+        // Delete from internal_agents JSON
+        const url = (orch.teamEnabled && orch.teamName) 
+            ? `/internal_agents/${encodeURIComponent(sessionId)}?team=${encodeURIComponent(orch.teamName)}` 
+            : `/internal_agents/${encodeURIComponent(sessionId)}`;
+        const resp = await fetch(url, { method: 'DELETE' });
+        if (resp.ok) {
+            // Reload the list
+            await orchLoadSessionAgents();
+        } else {
+            const data = await resp.json();
+            alert('Delete failed: ' + (data.error || 'Unknown error'));
+        }
+    } catch (e) {
+        alert('Delete failed: ' + e.message);
     }
 }
 

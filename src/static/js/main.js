@@ -374,6 +374,27 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         orch_toast_expert_deleted: '已删除: {name}',
         orch_toast_expert_del_fail: '删除失败',
         orch_toast_added_mobile: '已添加到画布',
+        // Team management
+        orch_btn_create_team: '➕ 创建',
+        orch_btn_delete_team: '🗑️ 删除',
+        orch_btn_download_snapshot: '⬇️ 快照',
+        orch_btn_upload_snapshot: '⬆️ 上传',
+        orch_tip_create_team: '创建新team',
+        orch_tip_delete_team: '删除当前team',
+        orch_tip_download_snapshot: '下载team快照',
+        orch_tip_upload_snapshot: '上传team快照',
+        orch_toast_team_name_required: '请输入team名称',
+        orch_toast_team_created: 'Team已创建',
+        orch_toast_team_create_failed: '创建team失败',
+        orch_toast_team_deleted: 'Team已删除 ({count}个agent已移除)',
+        orch_toast_team_delete_failed: '删除team失败',
+        orch_toast_snapshot_downloaded: '快照已下载',
+        orch_toast_snapshot_download_failed: '下载快照失败',
+        orch_toast_snapshot_uploaded: '快照已上传，agent已恢复',
+        orch_toast_snapshot_upload_failed: '上传快照失败',
+        orch_toast_invalid_zip: '请选择.zip文件',
+        orch_toast_network_error: '网络错误',
+        orch_confirm_delete_team: '删除team "{name}"及其所有agent？',
         // Confirm dialogs
         orch_confirm_del_expert: '删除自定义专家 "{name}"？',
         orch_confirm_del_layout: '确定删除布局 "{name}"？',
@@ -849,6 +870,27 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         orch_toast_drop_yaml: 'Drop YAML file here to import',
         orch_drop_hint: 'Release to import YAML file',
         orch_toast_not_yaml: 'Only .yaml / .yml files supported',
+        // Team management
+        orch_btn_create_team: '➕ Create',
+        orch_btn_delete_team: '🗑️ Delete',
+        orch_btn_download_snapshot: '⬇️ Snapshot',
+        orch_btn_upload_snapshot: '⬆️ Upload',
+        orch_tip_create_team: 'Create new team',
+        orch_tip_delete_team: 'Delete current team',
+        orch_tip_download_snapshot: 'Download team snapshot',
+        orch_tip_upload_snapshot: 'Upload team snapshot',
+        orch_toast_team_name_required: 'Please enter team name',
+        orch_toast_team_created: 'Team created',
+        orch_toast_team_create_failed: 'Failed to create team',
+        orch_toast_team_deleted: 'Team deleted ({count} agents removed)',
+        orch_toast_team_delete_failed: 'Failed to delete team',
+        orch_toast_snapshot_downloaded: 'Snapshot downloaded',
+        orch_toast_snapshot_download_failed: 'Failed to download snapshot',
+        orch_toast_snapshot_uploaded: 'Snapshot uploaded and agents restored',
+        orch_toast_snapshot_upload_failed: 'Failed to upload snapshot',
+        orch_toast_invalid_zip: 'Please select a .zip file',
+        orch_toast_network_error: 'Network error',
+        orch_confirm_delete_team: 'Delete team "{name}" and all its agents?',
         // Confirm dialogs
         orch_confirm_del_expert: 'Delete custom expert "{name}"?',
         orch_confirm_del_layout: 'Delete layout "{name}"?',
@@ -1392,7 +1434,10 @@ async function submitAgentMeta() {
     if (_agentMetaMode === 'edit' && _agentMetaSessionId) {
         // Update existing agent via PUT
         try {
-            await fetch(`/internal_agents/${encodeURIComponent(_agentMetaSessionId)}`, {
+            const url = _currentAgentTeam 
+                ? `/internal_agents/${encodeURIComponent(_agentMetaSessionId)}?team=${encodeURIComponent(_currentAgentTeam)}`
+                : `/internal_agents/${encodeURIComponent(_agentMetaSessionId)}`;
+            await fetch(url, {
                 method: 'PUT',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ meta })
@@ -1403,10 +1448,42 @@ async function submitAgentMeta() {
     if (_agentMetaCallback) { _agentMetaCallback(meta); _agentMetaCallback = null; }
 }
 
-// Helper: load internal agent meta as a map { session_id: meta }
-async function _loadAgentMetaMap() {
+// ===== Team Selection for Agent Sidebar =====
+let _currentAgentTeam = '';  // Current selected team in agent sidebar
+
+async function loadAgentTeams() {
     try {
-        const resp = await fetch('/internal_agents');
+        const resp = await fetch('/teams');
+        const data = await resp.json();
+        const select = document.getElementById('agent-team-select');
+        if (!select) return;
+        select.innerHTML = '<option value="">(公共)</option>';
+        if (data.teams && data.teams.length > 0) {
+            for (const team of data.teams) {
+                const opt = document.createElement('option');
+                opt.value = team;
+                opt.textContent = team;
+                select.appendChild(opt);
+            }
+        }
+        // Restore previous selection
+        select.value = _currentAgentTeam;
+    } catch (e) {
+        console.warn('Failed to load teams:', e);
+    }
+}
+
+function onAgentTeamChange() {
+    const select = document.getElementById('agent-team-select');
+    _currentAgentTeam = select.value;
+    loadSessionList();
+}
+
+// Helper: load internal agent meta as a map { session_id: meta }
+async function _loadAgentMetaMap(team = '') {
+    try {
+        const url = team ? `/internal_agents?team=${encodeURIComponent(team)}` : '/internal_agents';
+        const resp = await fetch(url);
         const data = await resp.json();
         const map = {};
         if (data.agents) {
@@ -1427,7 +1504,7 @@ async function editAgentMeta(sessionId) {
     // Load current meta from backend
     let existingMeta = {};
     try {
-        const agentMap = await _loadAgentMetaMap();
+        const agentMap = await _loadAgentMetaMap(_currentAgentTeam);
         existingMeta = agentMap[sessionId] || {};
     } catch (e) { /* ignore */ }
     // If tools is object, convert back to comma string for display
@@ -1455,7 +1532,8 @@ function handleNewSession() {
             </div>`;
         // Write internal agent JSON
         try {
-            await fetch('/internal_agents', {
+            const url = _currentAgentTeam ? `/internal_agents?team=${encodeURIComponent(_currentAgentTeam)}` : '/internal_agents';
+            await fetch(url, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ session: newSid, meta: meta })
@@ -1503,6 +1581,8 @@ async function openSessionSidebar() {
         }
         overlay.style.display = 'block';
     }
+    // Load team list
+    await loadAgentTeams();
     // 已有列表内容则增量刷新，否则全量加载
     const listEl = document.getElementById('session-list');
     if (listEl.querySelector('.session-item')) {
@@ -1553,7 +1633,7 @@ async function loadSessionList() {
     }
     try {
         // Load sessions and agent meta in parallel
-        const [resp, agentMap] = await Promise.all([fetch('/proxy_sessions'), _loadAgentMetaMap()]);
+        const [resp, agentMap] = await Promise.all([fetch('/proxy_sessions'), _loadAgentMetaMap(_currentAgentTeam)]);
         _cachedAgentMap = agentMap; // cache for shouldShowSession
         const data = await resp.json();
         // Merge: add sessions from agent JSON that are not in proxy_sessions
@@ -1601,7 +1681,7 @@ async function refreshHistoryList() {
         const [sessResp, statusResp, agentMap] = await Promise.all([
             fetch('/proxy_sessions'),
             fetch('/proxy_sessions_status'),
-            _loadAgentMetaMap()
+            _loadAgentMetaMap(_currentAgentTeam)
         ]);
         const sessData = await sessResp.json();
         const statusData = statusResp.ok ? await statusResp.json() : {};
@@ -1759,7 +1839,10 @@ async function deleteSession(sessionId) {
         if (resp.ok && data.status === 'success') {
             // Also delete internal agent JSON record
             try {
-                await fetch(`/internal_agents/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
+                const url = _currentAgentTeam 
+                    ? `/internal_agents/${encodeURIComponent(sessionId)}?team=${encodeURIComponent(_currentAgentTeam)}` 
+                    : `/internal_agents/${encodeURIComponent(sessionId)}`;
+                await fetch(url, { method: 'DELETE' });
             } catch (e) { /* ignore if not found */ }
             // 如果删除的是当前会话，自动开一个新的
             if (sessionId === currentSessionId) {
