@@ -193,6 +193,7 @@ for msg, script, wait_time in services:
     proc = subprocess.Popen(
         [venv_python, script],
         cwd=PROJECT_ROOT,
+        stdin=subprocess.DEVNULL,  # 防止子进程读 stdin 导致阻塞
         stdout=None,  # 继承父进程的 stdout
         stderr=None,  # 继承父进程的 stderr
     )
@@ -207,19 +208,23 @@ print("  按 Ctrl+C 停止所有服务")
 print("============================================")
 print()
 
-# 自动打开浏览器（仅在非 headless 模式下）
-if not is_headless:
-    import threading
+# 自动打开浏览器（后台线程）
+# 在无 GUI 环境下，webbrowser 可能尝试启动文本浏览器 (lynx/w3m) 并占用 stdin 导致卡死
+# 预防方式：无 DISPLAY 时将 BROWSER 设为 "true"（/usr/bin/true），静默跳过
+import threading
 
-    def _open_browser():
-        url = f"http://127.0.0.1:{PORT_FRONTEND}"
-        try:
-            webbrowser.open(url)
-            print(f"🌐 已自动打开浏览器: {url}")
-        except Exception:
-            print(f"⚠️  无法自动打开浏览器，请手动访问: {url}")
+def _open_browser():
+    url = f"http://127.0.0.1:{PORT_FRONTEND}"
+    if not os.environ.get("DISPLAY") and sys.platform != "darwin" and sys.platform != "win32":
+        # 无图形环境，设 BROWSER=true 让 webbrowser 调用 /usr/bin/true 而非文本浏览器
+        os.environ.setdefault("BROWSER", "true")
+    try:
+        webbrowser.open(url)
+        print(f"🌐 已自动打开浏览器: {url}")
+    except Exception:
+        print(f"⚠️  无法自动打开浏览器，请手动访问: {url}")
 
-    threading.Thread(target=_open_browser, daemon=True).start()
+threading.Thread(target=_open_browser, daemon=True).start()
 
 # 重启信号文件路径
 RESTART_FLAG = os.path.join(PROJECT_ROOT, ".restart_flag")
@@ -269,6 +274,7 @@ try:
                 proc = subprocess.Popen(
                     [venv_python, script],
                     cwd=PROJECT_ROOT,
+                    stdin=subprocess.DEVNULL,
                     stdout=None,
                     stderr=None,
                 )
