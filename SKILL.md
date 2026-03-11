@@ -71,6 +71,18 @@ All commands are executed in the project root directory.
 # Install dependencies
 bash selfskill/scripts/run.sh setup
 
+# Check and install OpenClaw (recommended — enables visual workflow orchestration)
+bash selfskill/scripts/run.sh check-openclaw
+# If OpenClaw is not installed, this will:
+#   1. Check if Node.js ≥ 22 is available
+#   2. ASK the user for confirmation before installing
+#   3. Run: npm install -g openclaw@latest --ignore-scripts
+#      (--ignore-scripts avoids node-llama-cpp build failure when cmake is missing)
+#   4. Verify openclaw is in PATH (npm global bin may need to be added)
+#   5. Guide user to run: openclaw onboard (interactive wizard for initial setup)
+#   6. Auto-detect OpenClaw gateway port and configure OPENCLAW_API_URL
+# If OpenClaw is already installed, it will show the current version and auto-configure.
+
 # Initialize configuration file
 bash selfskill/scripts/run.sh configure --init
 
@@ -685,6 +697,18 @@ selfskill/scripts/
 # 
 bash selfskill/scripts/run.sh setup
 
+# 检测并安装 OpenClaw（推荐 — 启用可视化工作流编排）
+bash selfskill/scripts/run.sh check-openclaw
+# 如果 OpenClaw 未安装，此命令会：
+#   1. 检测 Node.js ≥ 22 是否可用
+#   2. 询问用户确认后再安装
+#   3. 执行: npm install -g openclaw@latest --ignore-scripts
+#     （--ignore-scripts 避免 node-llama-cpp 因缺少 cmake 编译失败）
+#   4. 验证 openclaw 在 PATH 中可用（npm 全局 bin 路径可能需要手动添加）
+#   5. 引导用户运行: openclaw onboard（交互式向导完成初始配置）
+#   6. 自动探测 OpenClaw gateway 端口并配置 OPENCLAW_API_URL
+# 如果 OpenClaw 已安装，会显示版本信息并自动配置。
+
 # 
 bash selfskill/scripts/run.sh configure --init
 
@@ -1267,7 +1291,100 @@ bash selfskill/scripts/run.sh configure --batch \
   LLM_MODEL=deepseek-chat
 ```
 
-### 2. OpenClaw Integration (Required for visual workflow orchestration)
+### 2. OpenClaw Auto-Detection & Installation (Required for Visual Workflow)
+
+> ⚠️ **AGENT BEHAVIOR**: When the user wants to use OpenClaw features (visual workflow orchestration, multi-agent canvas, etc.), the agent MUST:
+> 1. First check if OpenClaw is installed: `which openclaw`
+> 2. If NOT installed → **ASK the user for confirmation** before proceeding with installation
+> 3. If confirmed → follow the installation steps below
+> 4. After installation → auto-configure `OPENCLAW_API_URL` and sync API key with TeamClaw's `LLM_API_KEY`
+> 5. If the user declines → skip OpenClaw installation, TeamClaw will still work (just without OpenClaw orchestration features)
+
+**Detection & Installation Flow:**
+
+```bash
+# Step 1: Check if OpenClaw is already installed
+bash selfskill/scripts/run.sh check-openclaw
+```
+
+**If OpenClaw is NOT installed, the agent should:**
+
+```bash
+# Step 2: Verify Node.js ≥ 22 is available (required by OpenClaw)
+node --version  # Must be v22.x.x or higher
+
+# If Node.js is not installed or version < 22:
+#   Option A (recommended): Download pre-built binary
+#     curl -fsSL https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-x64.tar.xz -o /tmp/node22.tar.xz
+#     tar -xf /tmp/node22.tar.xz -C /tmp
+#     export PATH="/tmp/node-v22.14.0-linux-x64/bin:$PATH"
+#   Option B: Via nvm
+#     nvm install 22 && nvm use 22
+
+# Step 3: Install OpenClaw globally (ONLY after user confirmation!)
+# ⚠️ MUST use --ignore-scripts to avoid node-llama-cpp build failure (requires cmake/xpm)
+npm install -g openclaw@latest --ignore-scripts
+
+# Step 4: Ensure openclaw is in PATH
+# npm global bin path may not be in PATH by default
+# Check with: npm bin -g   (e.g., /root/.npm/node_modules/bin)
+# If not in PATH, add it:
+export PATH="$(npm bin -g 2>/dev/null || npm prefix -g)/bin:$PATH"
+
+# Step 5: Verify installation
+openclaw --version
+
+# Step 6: Run the onboarding wizard (interactive — user must complete this)
+openclaw onboard --install-daemon
+# The wizard guides through: gateway setup, workspace config, channel pairing, skills
+
+# Step 7: Auto-configure TeamClaw's OpenClaw integration
+bash selfskill/scripts/run.sh check-openclaw
+# This will now detect the installed OpenClaw and auto-configure:
+#   - OPENCLAW_API_URL (from openclaw config get gateway.port)
+#   - OPENCLAW_SESSIONS_FILE (from openclaw workspace path)
+```
+
+**API Key Sync Strategy:**
+
+TeamClaw and OpenClaw maintain **separate API key configurations** — they serve different purposes:
+- `LLM_API_KEY` → TeamClaw's built-in Agent conversations and OASIS experts
+- `OPENCLAW_GATEWAY_TOKEN` → Authentication for OpenClaw Gateway API (HTTP fallback mode)
+
+The `check-openclaw` command will:
+1. Auto-detect `OPENCLAW_API_URL` via `openclaw config get gateway.port`
+2. Auto-detect `OPENCLAW_GATEWAY_TOKEN` from OpenClaw's configuration
+3. Auto-detect `OPENCLAW_SESSIONS_FILE` from OpenClaw's workspace path
+4. **Initialize workspace with default templates** (if files don't exist)
+5. Write all detected values to TeamClaw's `config/.env`
+
+> 💡 **Note**: OpenClaw agents are primarily invoked via CLI (`openclaw agent --agent <name> --message <msg>`), which does not require API keys. The `OPENCLAW_GATEWAY_TOKEN` is only used as a fallback when CLI is unavailable.
+
+**Default Workspace Templates:**
+
+The `check-openclaw` command automatically creates the following files in the OpenClaw workspace (`~/.openclaw/workspace`) if they don't exist. These follow the OpenClaw community's recommended workspace structure:
+
+| File | Purpose |
+|------|---------|
+| `BOOTSTRAP.md` | First-run initialization guide — asks user for name, role, timezone |
+| `SOUL.md` | **Core file** — defines AI behavior, principles, communication style |
+| `IDENTITY.md` | AI name, type, role, and personality traits |
+| `AGENTS.md` | Multi-agent collaboration config with TeamClaw integration |
+| `TOOLS.md` | Available tools and usage rules |
+| `USER.md` | User profile, timezone, preferences (updated via BOOTSTRAP) |
+| `HEARTBEAT.md` | Scheduled and recurring tasks |
+| `MEMORY.md` | Long-term memory for workspace context |
+
+OpenClaw loads all these files as agent context on every execution. **Existing files are never overwritten** — only missing files are created.
+
+To re-initialize templates manually:
+```bash
+python selfskill/scripts/configure_openclaw.py --init-workspace
+# Or specify a custom workspace path:
+python selfskill/scripts/configure_openclaw.py --init-workspace /path/to/workspace
+```
+
+### 3. OpenClaw Integration (Required for visual workflow orchestration)
 
 > ⚠️ **Reminder: OpenClaw API is NOT the same as LLM API above!**
 >
@@ -1324,7 +1441,100 @@ bash selfskill/scripts/run.sh configure --batch \
   LLM_MODEL=deepseek-chat
 ```
 
-### 2. OpenClaw 集成配置（使用可视化编排时必填）
+### 2. OpenClaw 自动检测与安装（使用可视化工作流时必需）
+
+> ⚠️ **Agent 行为规范**：当用户需要使用 OpenClaw 功能（可视化工作流编排、多 Agent 画布等）时，Agent 必须：
+> 1. 先检测 OpenClaw 是否已安装：`which openclaw`
+> 2. 如果未安装 → **必须先询问用户确认**再进行安装
+> 3. 用户确认后 → 按以下步骤安装
+> 4. 安装完成后 → 自动配置 `OPENCLAW_API_URL`，并与 TeamClaw 的 `LLM_API_KEY` 同步 API 密钥
+> 5. 用户拒绝 → 跳过安装，TeamClaw 仍可正常使用（仅无法使用 OpenClaw 编排功能）
+
+**检测与安装流程：**
+
+```bash
+# 步骤 1：检测 OpenClaw 是否已安装
+bash selfskill/scripts/run.sh check-openclaw
+```
+
+**如果 OpenClaw 未安装，Agent 应执行：**
+
+```bash
+# 步骤 2：确认 Node.js ≥ 22 可用（OpenClaw 的前置依赖）
+node --version  # 必须是 v22.x.x 或更高版本
+
+# 如果 Node.js 未安装或版本 < 22：
+#   方式 A（推荐）：下载预编译二进制
+#     curl -fsSL https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-x64.tar.xz -o /tmp/node22.tar.xz
+#     tar -xf /tmp/node22.tar.xz -C /tmp
+#     export PATH="/tmp/node-v22.14.0-linux-x64/bin:$PATH"
+#   方式 B：通过 nvm
+#     nvm install 22 && nvm use 22
+
+# 步骤 3：全局安装 OpenClaw（必须用户确认后再执行！）
+# ⚠️ 必须使用 --ignore-scripts 避免 node-llama-cpp 编译失败（需要 cmake/xpm）
+npm install -g openclaw@latest --ignore-scripts
+
+# 步骤 4：确保 openclaw 在 PATH 中
+# npm 全局 bin 路径可能不在默认 PATH 中
+# 检查方法: npm bin -g   （如 /root/.npm/node_modules/bin）
+# 如果不在 PATH 中，手动添加:
+export PATH="$(npm bin -g 2>/dev/null || npm prefix -g)/bin:$PATH"
+
+# 步骤 5：验证安装
+openclaw --version
+
+# 步骤 6：运行初始化向导（交互式 — 用户需完成此步骤）
+openclaw onboard --install-daemon
+# 向导将引导完成：gateway 设置、workspace 配置、channel 配对、skills 安装
+
+# 步骤 7：自动配置 TeamClaw 的 OpenClaw 集成
+bash selfskill/scripts/run.sh check-openclaw
+# 此时会检测到已安装的 OpenClaw 并自动配置：
+#   - OPENCLAW_API_URL（从 openclaw config get gateway.port 获取）
+#   - OPENCLAW_SESSIONS_FILE（从 openclaw workspace 路径获取）
+```
+
+**API 密钥同步策略：**
+
+TeamClaw 和 OpenClaw 使用**独立的 API 密钥配置** —— 用途不同：
+- `LLM_API_KEY` → TeamClaw 内置 Agent 对话和 OASIS 专家调用
+- `OPENCLAW_GATEWAY_TOKEN` → OpenClaw Gateway API 认证（HTTP 回退模式时使用）
+
+`check-openclaw` 命令会自动：
+1. 通过 `openclaw config get gateway.port` 探测 `OPENCLAW_API_URL`
+2. 从 OpenClaw 配置中探测 `OPENCLAW_GATEWAY_TOKEN`
+3. 从 OpenClaw workspace 路径探测 `OPENCLAW_SESSIONS_FILE`
+4. **初始化 workspace 默认模板**（仅在文件不存在时创建）
+5. 将所有探测到的值写入 TeamClaw 的 `config/.env`
+
+> 💡 **提示**：OpenClaw agent 主要通过 CLI 调用（`openclaw agent --agent <name> --message <msg>`），无需 API 密钥。`OPENCLAW_GATEWAY_TOKEN` 仅在 CLI 不可用时作为 HTTP 回退的认证凭据。
+
+**Workspace 默认模板：**
+
+`check-openclaw` 命令会自动在 OpenClaw workspace（`~/.openclaw/workspace`）中创建以下文件（如果不存在）。模板遵循 OpenClaw 社区推荐的 workspace 结构：
+
+| 文件 | 用途 |
+|------|------|
+| `BOOTSTRAP.md` | 首次运行初始化引导 — 询问用户名称、角色、时区等 |
+| `SOUL.md` | **核心文件** — 定义 AI 行为准则、沟通风格、安全规则 |
+| `IDENTITY.md` | AI 名称、类型、角色和性格特征 |
+| `AGENTS.md` | 多 Agent 协作配置，含 TeamClaw 集成说明 |
+| `TOOLS.md` | 可用工具列表和使用规则 |
+| `USER.md` | 用户资料、时区、偏好（通过 BOOTSTRAP 或手动更新） |
+| `HEARTBEAT.md` | 定时/周期任务（会话后、每日、每周） |
+| `MEMORY.md` | 长期记忆，保存用户偏好和重要决策 |
+
+OpenClaw 每次执行都会加载这些文件作为 agent 上下文。**已存在的文件不会被覆盖** — 只创建缺失的文件。
+
+手动重新初始化模板：
+```bash
+python selfskill/scripts/configure_openclaw.py --init-workspace
+# 或指定自定义 workspace 路径:
+python selfskill/scripts/configure_openclaw.py --init-workspace /path/to/workspace
+```
+
+### 3. OpenClaw 集成配置（使用可视化编排时必填）
 
 > ⚠️ **再次提醒：OpenClaw API 和上面的 LLM API 不是同一个东西！**
 >

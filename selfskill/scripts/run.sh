@@ -14,6 +14,7 @@
 #   bash selfskill/scripts/run.sh configure --batch K1=V1 K2=V2  # 批量设置配置
 #   bash selfskill/scripts/run.sh configure --show               # 查看当前配置
 #   bash selfskill/scripts/run.sh configure --init               # 从模板初始化 .env
+#   bash selfskill/scripts/run.sh check-openclaw                 # 检测/安装 OpenClaw
 #
 # 所有命令均为非交互式，适合自动化调用。
 
@@ -154,6 +155,128 @@ case "${1:-help}" in
         exit 0
         ;;
 
+    check-openclaw)
+        echo "=== OpenClaw 检测 ==="
+
+        # 1. 检测 openclaw 是否已安装
+        if command -v openclaw &>/dev/null; then
+            OC_VERSION=$(openclaw --version 2>/dev/null | head -1 || echo "unknown")
+            echo "✅ OpenClaw 已安装: $OC_VERSION"
+            OC_BIN=$(which openclaw)
+            echo "   路径: $OC_BIN"
+
+            # 自动探测并配置 + 初始化 workspace 模板
+            echo ""
+            echo "🔍 自动探测 OpenClaw 配置..."
+            python selfskill/scripts/configure_openclaw.py --auto-detect
+            echo ""
+            echo "=== OpenClaw 检测完成 ==="
+            exit 0
+        fi
+
+        # 2. OpenClaw 未安装
+        echo "⚠️  OpenClaw 未安装"
+        echo ""
+        echo "OpenClaw 是一个本地 AI 助手，TeamClaw 可以通过它进行可视化工作流编排。"
+        echo "安装 OpenClaw 需要："
+        echo "  - Node.js ≥ 22"
+        echo "  - npm install -g openclaw@latest"
+        echo "  - openclaw onboard --install-daemon"
+        echo ""
+
+        # 3. 检测 Node.js
+        if command -v node &>/dev/null; then
+            NODE_VER=$(node --version 2>/dev/null)
+            NODE_MAJOR=$(echo "$NODE_VER" | sed 's/^v//' | cut -d. -f1)
+            echo "📦 Node.js 版本: $NODE_VER"
+            if [ "$NODE_MAJOR" -lt 22 ] 2>/dev/null; then
+                echo "❌ Node.js 版本过低（需要 ≥ 22），请先升级 Node.js"
+                echo "   推荐: nvm install 22 && nvm use 22"
+                echo ""
+                echo "=== OpenClaw 检测完成（需先升级 Node.js）==="
+                exit 1
+            fi
+            echo "✅ Node.js 版本满足要求"
+        else
+            echo "❌ Node.js 未安装（OpenClaw 需要 Node.js ≥ 22）"
+            echo "   推荐安装方式："
+            echo "   curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash"
+            echo "   nvm install 22 && nvm use 22"
+            echo ""
+            echo "=== OpenClaw 检测完成（需先安装 Node.js）==="
+            exit 1
+        fi
+
+        echo ""
+        echo "🔧 准备安装 OpenClaw..."
+        echo "   将执行: npm install -g openclaw@latest --ignore-scripts"
+        echo "   （--ignore-scripts 避免 node-llama-cpp 因缺少 cmake 编译失败）"
+        echo ""
+
+        # 4. 询问用户确认（非交互模式跳过）
+        if [ "${OPENCLAW_AUTO_INSTALL:-}" = "1" ]; then
+            echo "📌 自动安装模式（OPENCLAW_AUTO_INSTALL=1）"
+            REPLY="y"
+        else
+            read -r -p "是否现在安装 OpenClaw？[y/N] " REPLY
+        fi
+
+        case "$REPLY" in
+            [yY]|[yY][eE][sS])
+                echo ""
+                echo "📥 正在安装 OpenClaw..."
+                if npm install -g openclaw@latest --ignore-scripts; then
+                    echo "✅ OpenClaw 安装成功"
+
+                    # 确保 npm 全局 bin 在 PATH 中
+                    NPM_BIN=$(npm bin -g 2>/dev/null || echo "")
+                    if [ -z "$NPM_BIN" ]; then
+                        NPM_BIN="$(npm prefix -g 2>/dev/null)/bin"
+                    fi
+                    if [ -n "$NPM_BIN" ] && [ -d "$NPM_BIN" ]; then
+                        case ":$PATH:" in
+                            *":$NPM_BIN:"*) ;;
+                            *)
+                                export PATH="$NPM_BIN:$PATH"
+                                echo "📌 已将 npm 全局 bin 路径添加到 PATH: $NPM_BIN"
+                                ;;
+                        esac
+                    fi
+
+                    OC_VERSION=$(openclaw --version 2>/dev/null | head -1 || echo "unknown")
+                    if [ "$OC_VERSION" = "unknown" ] && [ -n "$NPM_BIN" ]; then
+                        OC_VERSION=$("$NPM_BIN/openclaw" --version 2>/dev/null | head -1 || echo "unknown")
+                    fi
+                    echo "   版本: $OC_VERSION"
+
+                    # 初始化 workspace 默认模板
+                    echo ""
+                    echo "🏠 初始化 OpenClaw workspace 默认模板..."
+                    python selfskill/scripts/configure_openclaw.py --init-workspace
+
+                    echo ""
+                    echo "📋 下一步：运行 OpenClaw 初始化向导"
+                    echo "   openclaw onboard --install-daemon"
+                    echo ""
+                    echo "   向导完成后，再次运行此命令以自动配置 TeamClaw 集成："
+                    echo "   bash selfskill/scripts/run.sh check-openclaw"
+                else
+                    echo "❌ OpenClaw 安装失败，请检查 npm 和网络状态"
+                    exit 1
+                fi
+                ;;
+            *)
+                echo "⏭️  跳过 OpenClaw 安装"
+                echo "   TeamClaw 仍可正常使用（无法使用 OpenClaw 可视化编排功能）"
+                echo "   稍后可随时运行: bash selfskill/scripts/run.sh check-openclaw"
+                ;;
+        esac
+
+        echo ""
+        echo "=== OpenClaw 检测完成 ==="
+        exit 0
+        ;;
+
     start-tunnel)
         # 启动 Cloudflare Tunnel（自动下载 cloudflared + 暴露前端到公网）
         TUNNEL_PIDFILE="$PROJECT_ROOT/.tunnel.pid"
@@ -252,6 +375,7 @@ case "${1:-help}" in
         echo "  configure --batch K1=V1 K2=V2  批量设置配置"
         echo "  configure --show               查看当前配置"
         echo "  configure --init               从模板初始化 .env"
+        echo "  check-openclaw                 检测/安装 OpenClaw 并自动配置集成"
         echo "  help                           显示此帮助"
         exit 0
         ;;

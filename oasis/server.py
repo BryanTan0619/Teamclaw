@@ -1085,15 +1085,53 @@ def _build_agent_detail(agent_cfg: dict, defaults: dict) -> dict:
 async def get_openclaw_agent_detail(name: str = Query(...)):
     """Return detailed config for a single OpenClaw agent (skills, tools, profile)."""
     config = _fetch_openclaw_full_config()
-    if config is None:
-        return JSONResponse({"ok": False, "error": "Cannot read openclaw config"}, status_code=500)
 
-    defaults = config.get("defaults", {})
-    agent_list = config.get("list", [])
+    defaults = config.get("defaults", {}) if config else {}
+    agent_list = config.get("list", []) if config else []
+
+    # Helper: get CLI data for an agent to fill in missing fields
+    def _cli_data_for(agent_name: str) -> dict:
+        cli_agents = _fetch_openclaw_agents_via_cli()
+        if cli_agents:
+            for ca in cli_agents:
+                if ca.get("name") == agent_name or ca.get("id") == agent_name:
+                    return ca
+        return {}
+
+    # Try to find in full config first
     for a in agent_list:
         if a.get("id") == name or a.get("name") == name:
             detail = _build_agent_detail(a, defaults)
+            # If workspace is empty, supplement from CLI data
+            if not detail.get("workspace"):
+                cli = _cli_data_for(name)
+                if cli.get("workspace"):
+                    detail["workspace"] = cli["workspace"]
+                if cli.get("agentDir") and not detail.get("agentDir"):
+                    detail["agentDir"] = cli["agentDir"]
+                if cli.get("isDefault") and not detail.get("is_default"):
+                    detail["is_default"] = True
             return {"ok": True, "agent": detail}
+
+    # Fallback: when config has no explicit agents list (e.g. fresh install),
+    # try openclaw agents list --json which can still find the implicit default agent
+    cli_agents = _fetch_openclaw_agents_via_cli()
+    if cli_agents:
+        for a in cli_agents:
+            if a.get("name") == name or a.get("id") == name:
+                # Build a minimal detail from CLI data
+                detail = {
+                    "id": a.get("id", a.get("name", name)),
+                    "name": a.get("name", name),
+                    "workspace": a.get("workspace", defaults.get("workspace", "")),
+                    "agentDir": a.get("agentDir", ""),
+                    "is_default": a.get("isDefault", a.get("is_default", False)),
+                    "model": {},
+                    "tools": {"profile": "", "alsoAllow": [], "deny": []},
+                    "skills": [],
+                    "skills_all": True,
+                }
+                return {"ok": True, "agent": detail}
 
     return JSONResponse({"ok": False, "error": f"Agent '{name}' not found"}, status_code=404)
 
@@ -1192,8 +1230,45 @@ async def update_openclaw_agent_config(req: Request):
         if a.get("id") == agent_name or a.get("name") == agent_name:
             agent_idx = i
             break
+
+    # Fallback: if agent not in config list (e.g. fresh install with implicit default),
+    # verify the agent exists via CLI and auto-create a config entry
     if agent_idx is None:
-        return JSONResponse({"ok": False, "error": f"Agent '{agent_name}' not found"}, status_code=404)
+        cli_agents = _fetch_openclaw_agents_via_cli()
+        cli_match = None
+        if cli_agents:
+            for a in cli_agents:
+                if a.get("name") == agent_name or a.get("id") == agent_name:
+                    cli_match = a
+                    break
+        if cli_match is None:
+            return JSONResponse({"ok": False, "error": f"Agent '{agent_name}' not found"}, status_code=404)
+
+        # Auto-create the agent entry in config via openclaw config set
+        agent_idx = len(agent_list)  # append at end
+        init_entry = {
+            "id": cli_match.get("id", cli_match.get("name", agent_name)),
+            "name": cli_match.get("name", agent_name),
+        }
+        ws = cli_match.get("workspace", "")
+        if ws:
+            init_entry["workspace"] = ws
+        try:
+            result = subprocess.run(
+                [_OPENCLAW_BIN, "config", "set",
+                 f"agents.list[{agent_idx}]", json.dumps(init_entry), "--json"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode != 0:
+                return JSONResponse(
+                    {"ok": False, "error": f"Failed to create config entry: {result.stderr or result.stdout}"},
+                    status_code=500,
+                )
+        except Exception as e:
+            return JSONResponse(
+                {"ok": False, "error": f"Failed to create config entry: {e}"},
+                status_code=500,
+            )
 
     errors = []
 

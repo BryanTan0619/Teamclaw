@@ -1006,8 +1006,18 @@ async function loadChannelsTab(agentName, contentEl, overlay) {
 
         if (channels.length === 0) {
             contentEl.innerHTML = `<div style="padding:20px;text-align:center;font-size:12px;color:#9ca3af;">
-                📡 ${t('orch_oc_ch_empty')}<br>
-                <span style="font-size:10px;color:#d1d5db;font-family:monospace;">openclaw channels list --json</span>
+                <div style="font-size:24px;margin-bottom:8px;">📡</div>
+                <div style="margin-bottom:12px;font-weight:600;color:#6b7280;">${t('orch_oc_ch_empty')}</div>
+                <div style="text-align:left;font-size:11px;color:#9ca3af;background:#f9fafb;border-radius:8px;padding:12px;margin:0 auto;max-width:360px;line-height:1.7;">
+                    <div style="margin-bottom:8px;color:#6b7280;font-weight:600;">${t('orch_oc_ch_guide_title')}</div>
+                    <div style="font-family:monospace;font-size:10px;background:#1f2937;color:#d1fae5;padding:8px 10px;border-radius:6px;margin-bottom:8px;overflow-x:auto;white-space:pre-line;">
+# Telegram
+openclaw channels add --channel telegram --token BOT_TOKEN
+
+# Slack
+openclaw channels add --channel slack --token BOT_TOKEN</div>
+                    <div style="color:#9ca3af;font-size:10px;">${t('orch_oc_ch_guide_docs')} <a href="https://docs.openclaw.ai/gateway/configuration" target="_blank" style="color:#3b82f6;text-decoration:underline;">docs.openclaw.ai</a></div>
+                </div>
             </div>`;
             return;
         }

@@ -323,22 +323,29 @@ mainagent.py (FastAPI + LangGraph)  ── OpenAI-compatible API + Core Agent
 
 ## Quick Start
 
-### One-Click Run (Recommended)
+### Install via AI Code CLI (Recommended)
 
-```bash
-# Linux / macOS
-chmod +x run.sh
-./run.sh
+Open any AI Code CLI — such as **Cursor**, **Codex**, **Claude Code**, **CodeBuddy**, **Trae**, or any agent-capable coding assistant — and type:
 
-# Windows
-run.bat
+```
+Clone https://github.com/Avalon-467/Teamclaw.git and read the SKILL.md inside, then install TeamClaw.
 ```
 
-The script handles: environment setup → API Key config → create user → start all services.
+That's it. The AI agent will automatically:
 
-> Manual steps below can be skipped if using `run.sh` / `run.bat`.
+1. Clone the repository
+2. Read `SKILL.md` (the complete installation & operation guide)
+3. Set up the Python environment
+4. Prompt you for API Key configuration
+5. Create a user account
+6. Start all services
+
+> **Why this works:** TeamClaw is designed as a **Skill-oriented project**. The `SKILL.md` file contains everything an AI agent needs to install, configure, and operate TeamClaw — from environment setup to deployment. Any AI coding assistant that can read files and run commands will handle the entire process autonomously.
 
 ### Manual Setup
+
+<details>
+<summary>Click to expand manual setup steps (if not using AI Code CLI)</summary>
 
 **1. Environment**
 
@@ -381,6 +388,8 @@ python src/front.py        # Web UI
 ```
 
 Visit http://127.0.0.1:51209 after startup.
+
+</details>
 
 ### Public Deployment (Optional)
 
@@ -830,22 +839,29 @@ Agent 通过 MCP 协议集成 7 个工具服务，所有工具的 `username` 参
 
 ## 快速开始
 
-### 一键运行（推荐）
+### 通过 AI Code CLI 安装（推荐）
 
-```bash
-# Linux / macOS
-chmod +x run.sh
-./run.sh
+打开任意 AI Code CLI —— 如 **Cursor**、**Codex**、**Claude Code**、**CodeBuddy**、**Trae**，或任何支持 Agent 的编程助手 —— 输入：
 
-# Windows
-run.bat
+```
+下载 https://github.com/Avalon-467/Teamclaw.git 并阅读里面的 SKILL.md，安装 TeamClaw
 ```
 
-脚本自动完成：环境配置 → API Key 配置 → 创建用户 → 启动全部服务。
+然后等待即可。AI Agent 会自动完成：
 
-> 以下为手动分步操作说明，使用 `run.sh` / `run.bat` 可跳过。
+1. 克隆仓库
+2. 阅读 `SKILL.md`（完整的安装与操作指南）
+3. 配置 Python 环境
+4. 提示你设置 API Key
+5. 创建用户账户
+6. 启动全部服务
+
+> **原理：** TeamClaw 是一个 **Skill 驱动的项目**。`SKILL.md` 包含了 AI Agent 安装、配置和运行 TeamClaw 所需的一切信息——从环境搭建到部署上线。任何能读文件、能跑命令的 AI 编程助手都可以自主完成整个流程。
 
 ### 手动配置
+
+<details>
+<summary>点击展开手动配置步骤（不使用 AI Code CLI 时）</summary>
 
 **1. 环境配置**
 
@@ -889,6 +905,8 @@ python src/front.py        # Web UI
 ```
 
 启动后访问 http://127.0.0.1:51209 登录使用。
+
+</details>
 
 ### 公网部署（可选）
 
