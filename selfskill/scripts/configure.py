@@ -8,12 +8,14 @@
     python selfskill/scripts/configure.py --show-raw             # 显示当前配置（含原始值）
     python selfskill/scripts/configure.py --init                 # 从 .env.example 初始化 .env（不覆盖已有）
     python selfskill/scripts/configure.py --batch K1=V1 K2=V2    # 批量设置
+    python selfskill/scripts/configure.py --auto-model           # 查询 API 可用模型列表（供 agent 选择）
 
 示例:
     python skill/scripts/configure.py LLM_API_KEY sk-xxxx
     python skill/scripts/configure.py LLM_BASE_URL https://api.deepseek.com
     python skill/scripts/configure.py LLM_MODEL deepseek-chat
     python skill/scripts/configure.py --batch LLM_API_KEY=sk-xxx LLM_BASE_URL=https://api.deepseek.com LLM_MODEL=deepseek-chat
+    python skill/scripts/configure.py --auto-model
 """
 import os
 import re
@@ -232,6 +234,109 @@ AI_MODEL_TG=gemini-2.0-flash
 #         print(f"⚠️  开启 ChatCompletions 端点失败: {e}")
 
 
+import json
+import urllib.request
+import urllib.error
+
+def auto_detect_model():
+    """查询 API 可用模型列表并打印，供 AI agent 阅读后自行选择。
+
+    流程:
+    1. 从 .env 读取 LLM_API_KEY 和 LLM_BASE_URL
+    2. 调用 /v1/models 端点获取可用模型列表
+    3. 打印全部可用模型（不做自动选择）
+    4. 由调用方（AI agent）阅读输出，决定使用哪个模型，
+       再通过 configure LLM_MODEL <model> 设置
+
+    返回: list[str]  可用模型 ID 列表
+    """
+    _, kvs = read_env()
+
+    api_key = kvs.get("LLM_API_KEY", "").strip()
+    base_url = kvs.get("LLM_BASE_URL", "").strip()
+
+    if not api_key or api_key == "your_api_key_here":
+        print("❌ LLM_API_KEY 未设置，无法检测模型")
+        print("   请先设置: bash selfskill/scripts/run.sh configure LLM_API_KEY <your-key>")
+        return []
+
+    if not base_url:
+        print("❌ LLM_BASE_URL 未设置，无法检测模型")
+        print("   请先设置: bash selfskill/scripts/run.sh configure LLM_BASE_URL <url>")
+        return []
+
+    # 构建 /v1/models URL
+    models_url = base_url.rstrip("/")
+    if not models_url.endswith("/v1"):
+        models_url += "/v1"
+    models_url += "/models"
+
+    print(f"🔍 正在检测可用模型...")
+    print(f"   API: {base_url}")
+    print(f"   请求: GET {models_url}")
+
+    # 调用 /v1/models
+    req = urllib.request.Request(
+        models_url,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        err_body = ""
+        try:
+            err_body = e.read().decode()[:300]
+        except Exception:
+            pass
+        print(f"❌ API 返回错误 {e.code}: {err_body}")
+        if e.code == 401:
+            print("   → API Key 无效，请检查 LLM_API_KEY")
+        elif e.code == 404:
+            print("   → /v1/models 端点不存在，该 API 可能不支持模型列表查询")
+            print("   → 请手动指定: bash selfskill/scripts/run.sh configure LLM_MODEL <model-name>")
+        return []
+    except urllib.error.URLError as e:
+        print(f"❌ 无法连接到 API: {e.reason}")
+        print(f"   → 请检查 LLM_BASE_URL 是否正确: {base_url}")
+        return []
+    except Exception as e:
+        print(f"❌ 请求失败: {e}")
+        return []
+
+    # 解析模型列表
+    models_data = body.get("data", [])
+    if not models_data:
+        print("⚠️ API 返回了空的模型列表")
+        return []
+
+    # 提取模型 ID，过滤特殊/内部模型
+    all_ids = []
+    for m in models_data:
+        mid = m.get("id", "")
+        if mid and not mid.startswith("ft:") and not mid.startswith("dall-e"):
+            all_ids.append(mid)
+
+    all_ids.sort()
+
+    if not all_ids:
+        print("⚠️ 没有找到可用的模型")
+        return []
+
+    print(f"\n📋 API 可用模型 ({len(all_ids)} 个):")
+    for mid in all_ids:
+        print(f"   • {mid}")
+
+    print(f"\n💡 请从以上列表中选择一个模型，然后执行：")
+    print(f"   bash selfskill/scripts/run.sh configure LLM_MODEL <模型名>")
+
+    return all_ids
+
+
 def detect_openclaw_api_url():
     """通过 gateway.port 自动探测 OPENCLAW_API_URL"""
     try:
@@ -289,6 +394,18 @@ def main():
         show_env(raw=True)
     elif cmd == "--init":
         init_env()
+    elif cmd == "--auto-model":
+        print("🔍 查询 API 可用模型列表...")
+        print("=" * 60)
+        all_models = auto_detect_model()
+        print("=" * 60)
+        if all_models:
+            print(f"\n📋 共发现 {len(all_models)} 个可用模型")
+            print(f"💡 请选择一个模型并执行:")
+            print(f"   bash selfskill/scripts/run.sh configure LLM_MODEL <模型名>")
+        else:
+            print("\n❌ 未能获取模型列表，请检查 API 配置")
+            sys.exit(1)
     elif cmd == "--batch":
         if len(sys.argv) < 3:
             print("用法: configure.py --batch KEY1=VAL1 KEY2=VAL2 ...", file=sys.stderr)

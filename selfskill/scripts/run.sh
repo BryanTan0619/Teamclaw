@@ -155,6 +155,12 @@ case "${1:-help}" in
         exit 0
         ;;
 
+    auto-model)
+        # 查询 API 可用模型列表（打印供 agent 选择，不自动写入）
+        python selfskill/scripts/configure.py --auto-model
+        exit 0
+        ;;
+
     check-openclaw)
         echo "=== OpenClaw 检测 ==="
 
@@ -375,6 +381,7 @@ case "${1:-help}" in
         echo "  configure --batch K1=V1 K2=V2  批量设置配置"
         echo "  configure --show               查看当前配置"
         echo "  configure --init               从模板初始化 .env"
+        echo "  auto-model                     查询 API 可用模型列表（供 agent 选择）"
         echo "  check-openclaw                 检测/安装 OpenClaw 并自动配置集成"
         echo "  help                           显示此帮助"
         exit 0

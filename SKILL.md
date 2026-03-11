@@ -86,11 +86,21 @@ bash selfskill/scripts/run.sh check-openclaw
 # Initialize configuration file
 bash selfskill/scripts/run.sh configure --init
 
-# Configure LLM (required)
+# Configure LLM (required — at minimum LLM_API_KEY and LLM_BASE_URL)
+# If the user specifies a model name, set all three:
 bash selfskill/scripts/run.sh configure --batch \
   LLM_API_KEY=sk-your-key \
   LLM_BASE_URL=https://api.deepseek.com \
   LLM_MODEL=deepseek-chat
+
+# If the user does NOT specify a model name, set key + URL, then auto-detect:
+bash selfskill/scripts/run.sh configure --batch \
+  LLM_API_KEY=sk-your-key \
+  LLM_BASE_URL=https://api.deepseek.com
+bash selfskill/scripts/run.sh auto-model
+# → Queries /v1/models API, prints available models for the agent to choose
+# Then set the chosen model:
+# bash selfskill/scripts/run.sh configure LLM_MODEL <chosen-model>
 
 # ⚠️ Create user account (REQUIRED — without this you CANNOT log in to the Web UI or call API)
 # ⚠️ AGENT: You MUST ASK the user for their desired username and password BEFORE running this command!
@@ -712,11 +722,21 @@ bash selfskill/scripts/run.sh check-openclaw
 # 
 bash selfskill/scripts/run.sh configure --init
 
-#  LLM
+#  LLM（至少需要 LLM_API_KEY 和 LLM_BASE_URL）
+# 如果用户指定了模型名称，直接设置三项：
 bash selfskill/scripts/run.sh configure --batch \
   LLM_API_KEY=sk-your-key \
   LLM_BASE_URL=https://api.deepseek.com \
   LLM_MODEL=deepseek-chat
+
+# 如果用户没有指定模型名称，设置 key + URL 后自动检测：
+bash selfskill/scripts/run.sh configure --batch \
+  LLM_API_KEY=sk-your-key \
+  LLM_BASE_URL=https://api.deepseek.com
+bash selfskill/scripts/run.sh auto-model
+# → 查询 /v1/models 接口，打印可用模型列表，由 agent 选择
+# 然后设置选定的模型：
+# bash selfskill/scripts/run.sh configure LLM_MODEL <选定的模型>
 
 # 
 # ⚠️ AGENT：执行此命令前，必须先询问用户想要的用户名和密码！
@@ -1282,16 +1302,27 @@ Before starting TeamClaw for the first time, the following environment variables
 |----------|-------------|---------|
 | `LLM_API_KEY` | Your LLM provider's API key. **This is mandatory.** | `sk-xxxxxxxxxxxxxxxx` |
 | `LLM_BASE_URL` | Base URL of your LLM provider's API endpoint. | `https://api.deepseek.com` |
-| `LLM_MODEL` | The model name to use for conversations. | `deepseek-chat` / `gpt-4o` / `gemini-2.5-flash` |
+| `LLM_MODEL` | The model name to use. **If not specified, auto-detected.** | `deepseek-chat` / `gpt-4o` / `gemini-2.5-flash` |
 
 > ⚠️ **If the user does not specify `LLM_MODEL`**: the agent MUST auto-detect it instead of guessing. Use the supplied API key and base URL to list provider models, choose the newest plausible chat model, then confirm it with a real completion request before writing `LLM_MODEL` into `config/.env`.
 
 ```bash
+# Option A: User specifies model name
 bash selfskill/scripts/run.sh configure --batch \
   LLM_API_KEY=sk-your-key \
   LLM_BASE_URL=https://api.deepseek.com \
   LLM_MODEL=deepseek-chat
+
+# Option B: Auto-detect model (when user doesn't specify)
+bash selfskill/scripts/run.sh configure --batch \
+  LLM_API_KEY=sk-your-key \
+  LLM_BASE_URL=https://api.deepseek.com
+bash selfskill/scripts/run.sh auto-model
+# → Lists available models; agent reads the output and picks one
+bash selfskill/scripts/run.sh configure LLM_MODEL <chosen-model>
 ```
+
+> 💡 **`auto-model` behavior**: Calls the API's `/v1/models` endpoint and prints all available models. It does **not** auto-select or write to `.env` — the AI agent reads the printed list, picks the most suitable model (preferring general chat models over reasoning-only models), and sets it via `configure LLM_MODEL <model>`. This avoids hardcoding model preferences that quickly become outdated as providers update their offerings.
 
 ### 2. OpenClaw Auto-Detection & Installation (Required for Visual Workflow)
 
@@ -1436,16 +1467,27 @@ When the tunnel starts, `cloudflared` is **auto-downloaded** if not present, and
 |------|------|------|
 | `LLM_API_KEY` | LLM 服务商的 API 密钥，**必填项**。 | `sk-xxxxxxxxxxxxxxxx` |
 | `LLM_BASE_URL` | LLM 服务商的 API 基础地址。 | `https://api.deepseek.com` |
-| `LLM_MODEL` | 使用的模型名称。 | `deepseek-chat` / `gpt-4o` / `gemini-2.5-flash` |
+| `LLM_MODEL` | 使用的模型名称。**用户未指定时自动检测。** | `deepseek-chat` / `gpt-4o` / `gemini-2.5-flash` |
 
 > ⚠️ **如果用户没有指定 `LLM_MODEL`**：Agent 不得猜测或直接套示例默认值。必须使用用户提供的 API key 和 base URL 先列出可用模型，选择最新且合理的对话模型，再用一次真实请求验证可调用后，才写入 `config/.env`。
 
 ```bash
+# 方式 A：用户指定了模型名称
 bash selfskill/scripts/run.sh configure --batch \
   LLM_API_KEY=sk-your-key \
   LLM_BASE_URL=https://api.deepseek.com \
   LLM_MODEL=deepseek-chat
+
+# 方式 B：自动检测模型（用户未指定模型时使用）
+bash selfskill/scripts/run.sh configure --batch \
+  LLM_API_KEY=sk-your-key \
+  LLM_BASE_URL=https://api.deepseek.com
+bash selfskill/scripts/run.sh auto-model
+# → 列出可用模型列表；agent 阅读输出并选择一个
+bash selfskill/scripts/run.sh configure LLM_MODEL <选定的模型>
 ```
+
+> 💡 **`auto-model` 工作原理**：调用 API 的 `/v1/models` 端点，打印所有可用模型列表。它**不会**自动选择或写入 `.env` —— AI agent 阅读打印的列表，选择最合适的模型（优先选择通用聊天模型而非纯推理模型），然后通过 `configure LLM_MODEL <模型名>` 设置。这样避免了硬编码模型偏好导致随厂商更新而过时的问题。
 
 ### 2. OpenClaw 自动检测与安装（使用可视化工作流时必需）
 
