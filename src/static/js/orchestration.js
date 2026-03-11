@@ -497,12 +497,22 @@ async function orchLoadOpenClawSessions() {
 
             card.innerHTML = `<span class="orch-emoji">🦞</span><div style="min-width:0;flex:1;"><div class="orch-name" title="${escapeHtml(agentName)}">${escapeHtml(title)}</div>${mdl ? '<div class="orch-tag" style="color:#10b981;font-family:monospace;">' + escapeHtml(mdl) + '</div>' : ''}${metaLine ? '<div class="orch-tag" style="color:#6b7280;font-size:9px;">' + escapeHtml(metaLine) + '</div>' : ''}</div><div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0;">${agentWs ? '<button class="orch-oc-edit-btn" data-ws="' + escapeHtml(agentWs) + '" data-agent="' + escapeHtml(agentName) + '" title="' + t('orch_oc_edit_files') + '" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;opacity:0.5;line-height:1;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.5">📝</button>' : ''}<button class="orch-oc-cfg-btn" data-agent="${escapeHtml(agentName)}" title="${t('orch_oc_config')}" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;opacity:0.5;line-height:1;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0.5">⚙️</button></div>`;
             // model format: agent:<name> (CLI uses --agent <name>, no session-id)
-            const modelStr = 'agent:' + agentName;
+            // When team mode is active, strip the team prefix from the name
+            // so that the YAML stays portable across different team setups.
+            // The oasis engine will re-add the prefix at runtime based on the team parameter.
+            let yamlName = agentName;
+            if (orch.teamEnabled && orch.teamName) {
+                const prefix = orch.teamName + '_';
+                if (agentName.startsWith(prefix)) {
+                    yamlName = agentName.slice(prefix.length);
+                }
+            }
+            const modelStr = 'agent:' + yamlName;
             const nodeData = {
-                type: 'external', name: agentName, tag: 'openclaw', emoji: '🦞', temperature: 0.7,
+                type: 'external', name: yamlName, tag: 'openclaw', emoji: '🦞', temperature: 0.7,
                 api_url: openclawUrl, api_key: '****',
                 model: modelStr,
-                ext_id: agentName,  // use agent name as ext_id to distinguish different agents
+                ext_id: yamlName,  // use agent name as ext_id to distinguish different agents
             };
             orchBindCardEvents(card, nodeData);
             // Bind edit button (stop propagation so it doesn't trigger card add)
@@ -1420,7 +1430,7 @@ function orchShowAddOpenClawModal() {
     });
 
     overlay.querySelector('#orch-oc-create').addEventListener('click', async () => {
-        const name = nameInp.value.trim();
+        let name = nameInp.value.trim();
         const workspace = wsInp.value.trim();
         // Prepend team prefix if team mode is active
         if (orch.teamEnabled && orch.teamName) {

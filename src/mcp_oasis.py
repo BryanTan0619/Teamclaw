@@ -332,6 +332,7 @@ async def post_to_oasis(
     schedule_file: str = "",
     notify_session: str = "",
     discussion: bool = False,
+    team: str = "",
 ) -> str:
     """
     Submit a question or work task to the OASIS forum for multi-expert discussion or execution.
@@ -462,6 +463,10 @@ async def post_to_oasis(
                 # Do NOT send schedule_yaml when file is provided
             elif schedule_yaml:
                 body["schedule_yaml"] = schedule_yaml
+
+            # Pass team name for scoped agent storage
+            if team:
+                body["team"] = team
 
             resp = await client.post(
                 f"{OASIS_BASE_URL}/topics",

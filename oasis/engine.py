@@ -255,6 +255,7 @@ class DiscussionEngine:
                     timeout=bot_timeout,
                     tag=first,
                     extra_headers=cfg.get("headers"),
+                    team=self._team,
                 )
                 if is_openclaw and not api_url:
                     print(f"  [OASIS] 🦞 OpenClaw agent: {expert.name} (CLI only, no api_url)")
