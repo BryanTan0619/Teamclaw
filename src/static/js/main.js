@@ -4389,9 +4389,14 @@ async function loadTeamMembers() {
         }
         
         tbody.innerHTML = members.map(m => {
-            const typeBadge = m.type === 'oasis' 
-                ? '<span class="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded">Oasis</span>'
-                : '<span class="text-xs bg-green-50 text-green-600 px-2 py-1 rounded">Ext</span>';
+            let typeBadge;
+            if (m.type === 'oasis') {
+                typeBadge = '<span class="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded">Oasis</span>';
+            } else if (m.type === 'openclaw') {
+                typeBadge = '<span class="text-xs bg-purple-50 text-purple-600 px-2 py-1 rounded">🦞 OpenClaw</span>';
+            } else {
+                typeBadge = '<span class="text-xs bg-green-50 text-green-600 px-2 py-1 rounded">Ext</span>';
+            }
             const meta = m.meta || {};
             const apiUrl = meta.api_url || '';
             const apiKey = meta.api_key || '';
@@ -4487,6 +4492,17 @@ async function deleteTeamMember(type, session, name) {
                 const err = await resp.json();
                 throw new Error(err.error || '删除失败');
             }
+        } else if (type === 'openclaw') {
+            // OpenClaw agent: call proxy_openclaw_remove
+            const resp = await fetch('/proxy_openclaw_remove', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: session })
+            });
+            if (!resp.ok) {
+                const err = await resp.json();
+                throw new Error(err.error || '删除失败');
+            }
         } else {
             // External agent: need to remove from openclaw_agents.json
             const resp = await fetch(`/teams/${encodeURIComponent(currentGroupId)}/members/external`, {
@@ -4530,9 +4546,6 @@ function showAddTeamMemberModal() {
             <!-- Oasis Agent Form -->
             <div id="form-oasis">
                 <div style="display:flex;flex-direction:column;gap:8px;">
-                    <label style="font-size:11px;font-weight:600;color:#374151;">会话ID (Session ID)
-                        <input id="add-oasis-session" type="text" placeholder="输入会话ID" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;">
-                    </label>
                     <label style="font-size:11px;font-weight:600;color:#374151;">名称
                         <input id="add-oasis-name" type="text" placeholder="输入Agent名称" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;">
                     </label>
@@ -4744,14 +4757,16 @@ function switchAddMemberTab(tab) {
 }
 
 async function addOasisMember() {
-    const session = document.getElementById('add-oasis-session').value.trim();
     const name = document.getElementById('add-oasis-name').value.trim();
     const tag = document.getElementById('add-oasis-tag').value.trim();
     
-    if (!session) {
-        alert('请输入会话ID');
+    if (!name) {
+        alert('请输入Agent名称');
         return;
     }
+    
+    // Generate automatic session ID (UUID format)
+    const session = 'oc_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
     
     try {
         const url = `/internal_agents?team=${encodeURIComponent(currentGroupId)}`;
@@ -4761,7 +4776,7 @@ async function addOasisMember() {
             body: JSON.stringify({
                 session: session,
                 meta: {
-                    name: name || session,
+                    name: name,
                     tag: tag || ''
                 }
             })

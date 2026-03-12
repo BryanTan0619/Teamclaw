@@ -571,6 +571,25 @@ def proxy_openclaw_agent_bind():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/proxy_openclaw_remove", methods=["DELETE"])
+def proxy_openclaw_remove():
+    """Proxy to delete an OpenClaw agent via OASIS server."""
+    try:
+        body = request.get_json(force=True)
+        agent_name = body.get("name", "")
+        if not agent_name:
+            return jsonify({"ok": False, "error": "Agent name is required"}), 400
+        
+        r = requests.delete(
+            f"{OASIS_BASE_URL}/sessions/openclaw/remove",
+            json={"name": agent_name},
+            timeout=15,
+        )
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 # ------------------------------------------------------------------
 # Team OpenClaw Snapshot — export/restore agent configs in team folder
 # ------------------------------------------------------------------
@@ -1921,7 +1940,7 @@ def delete_team(team_name):
 @app.route("/teams/<team_name>/members", methods=["GET"])
 def get_team_members(team_name):
     """Get all members (agents) in a team.
-    Returns list of agents with name, type (oasis/ext), tag, and session.
+    Returns list of agents with name, type (oasis/openclaw/ext), tag, and session.
     """
     user_id = session.get("user_id")
     if not user_id:
@@ -1949,6 +1968,29 @@ def get_team_members(team_name):
                 "tag": meta.get("tag", ""),
                 "session": agent.get("session", "")
             })
+        
+        # Load OpenClaw agents from OASIS server
+        try:
+            r = requests.get(
+                f"{OASIS_BASE_URL}/sessions/openclaw",
+                params={"filter": ""},
+                timeout=10,
+            )
+            if r.ok:
+                data = r.json()
+                openclaw_sessions = data.get("sessions", [])
+                for oc_session in openclaw_sessions:
+                    # Filter agents that belong to this team (name starts with team_name_)
+                    agent_name = oc_session.get("name", "")
+                    if agent_name.startswith(f"{team_name}_"):
+                        members.append({
+                            "name": agent_name,
+                            "type": "openclaw",
+                            "tag": "",
+                            "session": agent_name  # For OpenClaw, session is the same as name
+                        })
+        except Exception as e:
+            print(f"Warning: Failed to load OpenClaw agents: {e}")
         
         # Load external agents from openclaw_agents.json
         openclaw_path = os.path.join(team_dir, "openclaw_agents.json")
