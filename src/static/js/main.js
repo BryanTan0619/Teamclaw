@@ -4048,6 +4048,7 @@ async function openGroup(teamName) {
         '<div class="team-members-header">' +
         '<h3 class="font-bold text-gray-800">👥 团队成员</h3>' +
         '<div style="display:flex;gap:8px;align-items:center;">' +
+        '<button onclick="loadTeamMembers()" class="text-gray-400 hover:text-gray-600 hover:bg-gray-100 px-2 py-1 rounded transition-colors" title="刷新成员列表">🔄</button>' +
         '<button onclick="showAddTeamMemberModal()" class="text-gray-400 hover:text-gray-600 hover:bg-gray-100 px-2 py-1 rounded transition-colors" title="添加成员">➕</button>' +
         '<button onclick="toggleTeamMembersView()" class="text-gray-400 hover:text-gray-600 text-sm">&times;</button>' +
         '</div>' +
