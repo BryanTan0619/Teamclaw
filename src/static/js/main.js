@@ -4521,9 +4521,10 @@ function showAddTeamMemberModal() {
         <div class="orch-modal" style="min-width:380px;max-width:460px;">
             <h3>➕ 添加成员</h3>
             
-            <div style="display:flex;gap:8px;margin-bottom:12px;">
-                <button id="tab-oasis" onclick="switchAddMemberTab('oasis')" style="flex:1;padding:8px;border:1px solid #d1d5db;border-radius:6px;background:#2563eb;color:white;font-size:12px;cursor:pointer;">Oasis Agent</button>
-                <button id="tab-external" onclick="switchAddMemberTab('external')" style="flex:1;padding:8px;border:1px solid #d1d5db;border-radius:6px;background:#f9fafb;color:#374151;font-size:12px;cursor:pointer;">External Agent</button>
+            <div style="display:flex;gap:6px;margin-bottom:12px;">
+                <button id="tab-oasis" onclick="switchAddMemberTab('oasis')" style="flex:1;padding:7px;border:1px solid #d1d5db;border-radius:6px;background:#2563eb;color:white;font-size:11px;cursor:pointer;">Oasis</button>
+                <button id="tab-openclaw" onclick="switchAddMemberTab('openclaw')" style="flex:1;padding:7px;border:1px solid #d1d5db;border-radius:6px;background:#f9fafb;color:#374151;font-size:11px;cursor:pointer;">🦞 OpenClaw</button>
+                <button id="tab-external" onclick="switchAddMemberTab('external')" style="flex:1;padding:7px;border:1px solid #d1d5db;border-radius:6px;background:#f9fafb;color:#374151;font-size:11px;cursor:pointer;">External</button>
             </div>
             
             <!-- Oasis Agent Form -->
@@ -4571,6 +4572,44 @@ function showAddTeamMemberModal() {
                 <div class="orch-modal-btns" style="margin-top:12px;">
                     <button onclick="document.getElementById('add-team-member-overlay').remove()" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;font-size:12px;">取消</button>
                     <button onclick="addExternalMember()" style="padding:6px 14px;border-radius:6px;border:none;background:#10b981;color:white;cursor:pointer;font-size:12px;">添加</button>
+                </div>
+            </div>
+
+            <!-- OpenClaw Agent Form -->
+            <div id="form-openclaw" style="display:none;">
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                    <label style="font-size:11px;font-weight:600;color:#374151;">
+                        Agent名称
+                        <div style="display:flex;align-items:center;gap:0;margin-top:2px;">
+                            <span style="padding:6px 4px 6px 8px;border:1px solid #d1d5db;border-right:none;border-radius:6px 0 0 6px;font-size:12px;background:#f3f4f6;color:#6b7280;white-space:nowrap;">${escapeHtml(currentGroupId)}_</span>
+                            <input id="add-oc-name" type="text" placeholder="work, research, coding"
+                                   style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:0 6px 6px 0;font-size:12px;"
+                                   pattern="[a-zA-Z0-9_-]+" title="仅支持字母、数字、下划线、短横线">
+                        </div>
+                    </label>
+                    <label style="font-size:11px;font-weight:600;color:#374151;">
+                        工作空间路径
+                        <div style="display:flex;gap:4px;align-items:center;margin-top:2px;">
+                            <input id="add-oc-workspace" type="text" placeholder="加载中..."
+                                   style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:11px;font-family:monospace;color:#374151;">
+                            <button id="add-oc-ws-reset" type="button" title="重置"
+                                    style="padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;background:#f9fafb;cursor:pointer;font-size:11px;white-space:nowrap;">↺</button>
+                        </div>
+                    </label>
+                    <div style="font-size:10px;color:#6b7280;background:#f9fafb;border-radius:6px;padding:8px;">
+                        📂 工作空间是OpenClaw Agent存储文件和配置的地方，建议使用绝对路径
+                    </div>
+                    <div style="border:1px dashed #c4b5fd;border-radius:8px;padding:10px;background:#faf5ff;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;">
+                            <span style="font-size:11px;font-weight:600;color:#7c3aed;">📥 导入专家人设 (可选)</span>
+                            <button id="add-oc-pick-expert" type="button" style="padding:3px 10px;border-radius:4px;border:1px solid #8b5cf6;background:#f5f3ff;color:#7c3aed;cursor:pointer;font-size:10px;font-weight:500;">选择专家</button>
+                        </div>
+                        <div id="add-oc-expert-preview" style="display:none;margin-top:8px;padding:6px 8px;background:white;border-radius:6px;border:1px solid #e5e7eb;font-size:11px;color:#374151;"></div>
+                    </div>
+                </div>
+                <div class="orch-modal-btns" style="margin-top:12px;">
+                    <button onclick="document.getElementById('add-team-member-overlay').remove()" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;font-size:12px;">取消</button>
+                    <button onclick="addOpenClawMember()" style="padding:6px 14px;border-radius:6px;border:none;background:#7c3aed;color:white;cursor:pointer;font-size:12px;">🦞 创建</button>
                 </div>
             </div>
         </div>
@@ -4625,6 +4664,63 @@ function showAddTeamMemberModal() {
             } catch(err) {}
         });
     }
+
+    // ── OpenClaw Agent Form Setup ──
+    const ocNameInp = document.getElementById('add-oc-name');
+    const ocWsInp = document.getElementById('add-oc-workspace');
+    let ocParentDir = '';
+    let ocWsManualEdit = false;
+
+    // Fetch default workspace parent dir
+    fetch('/proxy_openclaw_default_workspace').then(r => r.json()).then(res => {
+        if (res.ok && res.parent_dir) {
+            ocParentDir = res.parent_dir;
+            ocWsInp.placeholder = ocParentDir + '/workspace-...';
+        } else {
+            ocWsInp.placeholder = '请输入工作空间路径';
+        }
+    }).catch(() => { ocWsInp.placeholder = '请输入工作空间路径'; });
+
+    // Name changes → auto-update workspace (unless user has manually edited it)
+    ocNameInp.addEventListener('input', () => {
+        ocNameInp.style.borderColor = '#d1d5db';
+        ocNameInp.style.background = '';
+        if (!ocWsManualEdit && ocParentDir) {
+            const n = ocNameInp.value.trim();
+            ocWsInp.value = n ? (ocParentDir + '/workspace-' + n) : '';
+        }
+    });
+
+    // Track manual workspace edits
+    ocWsInp.addEventListener('input', () => { ocWsManualEdit = true; });
+
+    // Reset button: revert workspace to auto-derived value
+    overlay.querySelector('#add-oc-ws-reset').addEventListener('click', () => {
+        ocWsManualEdit = false;
+        const n = ocNameInp.value.trim();
+        ocWsInp.value = (ocParentDir && n) ? (ocParentDir + '/workspace-' + n) : '';
+        ocWsInp.style.borderColor = '#d1d5db';
+    });
+
+    // Expert import picker
+    const ocExpertPreview = overlay.querySelector('#add-oc-expert-preview');
+    overlay.querySelector('#add-oc-pick-expert').addEventListener('click', () => {
+        showExpertPickerForTeam((expert) => {
+            const content = '# ' + (expert.name || expert.tag) + '\n\n' + (expert.persona || '');
+            // Store selected expert content on the button for later access
+            overlay.querySelector('#add-oc-pick-expert')._selectedExpertContent = content;
+            
+            ocExpertPreview.style.display = 'block';
+            ocExpertPreview.innerHTML = '<div style="display:flex;align-items:center;gap:6px;"><span style="font-size:16px;">' + (expert.emoji || '⭐') + '</span><span style="font-weight:600;">' + escapeHtml(expert.name) + '</span><button id="add-oc-clear-expert" type="button" style="margin-left:auto;padding:1px 6px;border:1px solid #d1d5db;border-radius:4px;background:#f9fafb;cursor:pointer;font-size:10px;color:#6b7280;">✕</button></div>'
+                + '<div style="font-size:10px;color:#6b7280;margin-top:4px;max-height:60px;overflow:hidden;white-space:pre-wrap;word-break:break-all;">' + escapeHtml((expert.persona || '').slice(0, 120) + ((expert.persona || '').length > 120 ? '…' : '')) + '</div>';
+            ocExpertPreview.querySelector('#add-oc-clear-expert').addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                overlay.querySelector('#add-oc-pick-expert')._selectedExpertContent = null;
+                ocExpertPreview.style.display = 'none';
+                ocExpertPreview.innerHTML = '';
+            });
+        });
+    });
     
     // Click outside to close
     overlay.addEventListener('click', (e) => {
@@ -4637,9 +4733,12 @@ function showAddTeamMemberModal() {
 function switchAddMemberTab(tab) {
     document.getElementById('form-oasis').style.display = tab === 'oasis' ? 'block' : 'none';
     document.getElementById('form-external').style.display = tab === 'external' ? 'block' : 'none';
+    document.getElementById('form-openclaw').style.display = tab === 'openclaw' ? 'block' : 'none';
     
     document.getElementById('tab-oasis').style.background = tab === 'oasis' ? '#2563eb' : '#f9fafb';
     document.getElementById('tab-oasis').style.color = tab === 'oasis' ? 'white' : '#374151';
+    document.getElementById('tab-openclaw').style.background = tab === 'openclaw' ? '#7c3aed' : '#f9fafb';
+    document.getElementById('tab-openclaw').style.color = tab === 'openclaw' ? 'white' : '#374151';
     document.getElementById('tab-external').style.background = tab === 'external' ? '#10b981' : '#f9fafb';
     document.getElementById('tab-external').style.color = tab === 'external' ? 'white' : '#374151';
 }
@@ -5024,11 +5123,190 @@ async function showAgentConfigModal(type, session, name, tag, api_url, api_key, 
                 if (data.tag && data.tag !== 'manual' && data.tag !== 'conditional') {
                     const tagSelect = document.getElementById('config-agent-tag');
                     tagSelect.value = data.tag;
-                    dropZone.innerHTML = '✅ Tag: <b>' + escapeHtml(data.tag) + '</b> (' + escapeHtml(data.name || '') + ')';
+                dropZone.innerHTML = '✅ Tag: <b>' + escapeHtml(data.tag) + '</b> (' + escapeHtml(data.name || '') + ')';
                     dropZone.style.borderColor = '#2563eb';
                     dropZone.style.color = '#374151';
                 }
             } catch(err) {}
         });
+    }
+}
+
+// ── Expert Picker for Team Page ──
+async function showExpertPickerForTeam(onSelect) {
+    const overlay = document.createElement('div');
+    overlay.className = 'orch-modal-overlay';
+    overlay.id = 'team-expert-picker-overlay';
+    overlay.style.zIndex = '10001';
+    overlay.innerHTML = `
+        <div class="orch-modal" style="min-width:360px;max-width:520px;width:85vw;max-height:75vh;display:flex;flex-direction:column;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                <h3 style="margin:0;font-size:14px;">📥 选择专家</h3>
+                <button id="team-ep-close" style="background:none;border:none;font-size:18px;cursor:pointer;padding:2px 6px;color:#6b7280;">✕</button>
+            </div>
+            <input id="team-ep-search" type="text" placeholder="搜索专家..." style="padding:4px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:11px;margin-bottom:8px;">
+            <div id="team-ep-list" style="flex:1;overflow-y:auto;min-height:0;display:flex;flex-direction:column;gap:4px;">
+                <div style="text-align:center;color:#9ca3af;padding:20px;font-size:11px;">⏳ 加载中...</div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#team-ep-close').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    const listEl = overlay.querySelector('#team-ep-list');
+    const searchInput = overlay.querySelector('#team-ep-search');
+    let allExperts = [];
+
+    try {
+        const r = await fetch('/proxy_visual/experts');
+        allExperts = await r.json();
+    } catch(e) {
+        listEl.innerHTML = '<div style="color:#ef4444;padding:20px;text-align:center;font-size:11px;">❌ 网络错误</div>';
+        return;
+    }
+
+    function renderList(filter) {
+        listEl.innerHTML = '';
+        const keyword = (filter || '').toLowerCase();
+        const filtered = keyword ? allExperts.filter(ex =>
+            (ex.name||'').toLowerCase().includes(keyword) ||
+            (ex.tag||'').toLowerCase().includes(keyword) ||
+            (ex.persona||'').toLowerCase().includes(keyword) ||
+            (ex.category||'').toLowerCase().includes(keyword)
+        ) : allExperts;
+
+        if (filtered.length === 0) {
+            listEl.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:20px;font-size:11px;">无结果</div>';
+            return;
+        }
+
+        const groups = { public: [], agency: [], custom: [] };
+        filtered.forEach(ex => {
+            const src = ex.source || 'public';
+            if (groups[src]) groups[src].push(ex); else groups.public.push(ex);
+        });
+        const groupLabels = {
+            public: { icon: '🌟', label: '公共专家' },
+            agency: { icon: '🏢', label: '机构专家' },
+            custom: { icon: '🛠️', label: '自定义' },
+        };
+
+        for (const [src, items] of Object.entries(groups)) {
+            if (items.length === 0) continue;
+            const info = groupLabels[src] || { icon: '📂', label: src };
+            const header = document.createElement('div');
+            header.style.cssText = 'font-size:10px;font-weight:600;color:#6b7280;padding:4px 0;margin-top:4px;';
+            header.textContent = info.icon + ' ' + info.label + ' (' + items.length + ')';
+            listEl.appendChild(header);
+
+            for (const ex of items) {
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;transition:all .15s;background:#fff;';
+                row.addEventListener('mouseenter', () => { row.style.background = '#f5f3ff'; row.style.borderColor = '#c4b5fd'; });
+                row.addEventListener('mouseleave', () => { row.style.background = '#fff'; row.style.borderColor = '#e5e7eb'; });
+                const personaPreview = (ex.persona || '').length > 80 ? (ex.persona.slice(0, 80) + '…') : (ex.persona || '-');
+                row.innerHTML = `
+                    <span style="font-size:18px;flex-shrink:0;">${ex.emoji || '⭐'}</span>
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-size:12px;font-weight:600;color:#1f2937;">${escapeHtml(ex.name)}</div>
+                        <div style="font-size:10px;color:#6b7280;margin-top:1px;">${escapeHtml(ex.tag)}${ex.category ? ' · ' + escapeHtml(ex.category) : ''}</div>
+                        <div style="font-size:10px;color:#9ca3af;margin-top:3px;line-height:1.4;white-space:pre-wrap;word-break:break-all;">${escapeHtml(personaPreview)}</div>
+                    </div>
+                    <span style="font-size:14px;color:#7c3aed;flex-shrink:0;margin-top:2px;">→</span>
+                `;
+                row.addEventListener('click', () => {
+                    if (typeof onSelect === 'function') onSelect(ex);
+                    overlay.remove();
+                });
+                listEl.appendChild(row);
+            }
+        }
+    }
+
+    renderList('');
+    searchInput.addEventListener('input', () => renderList(searchInput.value));
+    setTimeout(() => searchInput.focus(), 100);
+}
+
+// ── Add OpenClaw Member Function ──
+async function addOpenClawMember() {
+    const overlay = document.getElementById('add-team-member-overlay');
+    if (!overlay) return;
+
+    const ocNameInp = document.getElementById('add-oc-name');
+    const ocWsInp = document.getElementById('add-oc-workspace');
+    
+    let name = ocNameInp.value.trim();
+    const workspace = ocWsInp.value.trim();
+    
+    // Prepend team prefix
+    name = currentGroupId + '_' + name;
+    
+    if (!name) {
+        alert('请输入Agent名称');
+        return;
+    }
+    if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+        alert('名称只能包含字母、数字、下划线、短横线');
+        return;
+    }
+    if (!workspace) {
+        alert('请输入工作空间路径');
+        return;
+    }
+
+    const btn = overlay.querySelector('#form-openclaw button[onclick="addOpenClawMember()"]');
+    btn.disabled = true;
+    btn.textContent = '⏳ 创建中...';
+
+    // Get selected expert content
+    const pickBtn = overlay.querySelector('#add-oc-pick-expert');
+    const selectedExpertContent = pickBtn ? pickBtn._selectedExpertContent : null;
+
+    try {
+        const r = await fetch('/proxy_openclaw_add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, workspace }),
+        });
+        const res = await r.json();
+        
+        if (r.ok && res.ok) {
+            // If expert was selected, write IDENTITY.md
+            if (selectedExpertContent) {
+                try {
+                    await fetch('/proxy_openclaw_workspace_file', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            workspace,
+                            filename: 'IDENTITY.md',
+                            content: selectedExpertContent
+                        }),
+                    });
+                } catch(e) { console.warn('Failed to write IDENTITY.md:', e); }
+            }
+            
+            alert('🦞 OpenClaw Agent创建成功！');
+            overlay.remove();
+            loadTeamMembers();
+        } else {
+            if (r.status === 409) {
+                alert('⚠️ Agent名称已存在，请使用其他名称');
+                ocNameInp.style.borderColor = '#ef4444';
+                ocNameInp.style.background = '#fef2f2';
+                ocNameInp.focus();
+                ocNameInp.select();
+            } else {
+                alert('❌ ' + (res.error || '创建失败'));
+            }
+            btn.disabled = false;
+            btn.textContent = '🦞 创建';
+        }
+    } catch(e) {
+        alert('❌ 网络错误');
+        btn.disabled = false;
+        btn.textContent = '🦞 创建';
     }
 }
