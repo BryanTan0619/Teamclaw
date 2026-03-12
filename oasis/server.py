@@ -1251,13 +1251,15 @@ async def list_openclaw_skills(name: str = Query("", description="Agent name to 
         skills = []
 
         # --- Determine agent-specific workspace & skill config ---
+        # Use config.list + _build_agent_detail which already applies defaults.workspace
         agent_workspace = None
         agent_skills_cfg: list | None = None  # None => skills_all (unrestricted)
 
         if name:
-            full_config = _fetch_openclaw_full_config()
-            defaults = full_config.get("defaults", {}) if full_config else {}
-            agent_list = full_config.get("list", []) if full_config else []
+            config = _fetch_openclaw_full_config()
+            defaults = config.get("defaults", {}) if config else {}
+            agent_list = config.get("list", []) if config else []
+
             for a in agent_list:
                 if a.get("id") == name or a.get("name") == name:
                     detail = _build_agent_detail(a, defaults)
