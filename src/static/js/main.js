@@ -4403,6 +4403,11 @@ async function loadTeamMembers() {
             const model = meta.model || '';
             const headers = meta.headers || {};
             
+            // For openclaw type, use the full orchestration config modal (files/tools/channels)
+            const configBtn = m.type === 'openclaw'
+                ? `<button onclick="orchShowAgentConfigModal('${escapeHtml(m.session)}')" class="text-purple-500 hover:text-purple-700 text-xs px-2 py-1 rounded hover:bg-purple-50" title="OpenClaw 配置 (Files / Tools / Channels)">🦞⚙️</button>`
+                : `<button onclick="showAgentConfigModal('${m.type}', '${escapeHtml(m.session)}', '${escapeHtml(m.name)}', '${escapeHtml(m.tag || '')}', '${escapeHtml(apiUrl)}', '${escapeHtml(apiKey)}', '${escapeHtml(model)}', '${escapeHtml(typeof headers === 'object' ? JSON.stringify(headers).replace(/"/g, '&quot;').replace(/'/g, "\\'") : headers)}')" class="text-blue-500 hover:text-blue-700 text-xs px-2 py-1 rounded hover:bg-blue-50" title="配置">⚙️</button>`;
+            
             return `
                 <tr>
                     <td class="font-medium text-gray-800">${escapeHtml(m.name)}</td>
@@ -4410,7 +4415,7 @@ async function loadTeamMembers() {
                     <td>${escapeHtml(m.tag || '-')}</td>
                     <td class="font-mono text-xs text-gray-500">${escapeHtml(m.session || '-')}</td>
                     <td style="text-align:right;">
-                        <button onclick="showAgentConfigModal('${m.type}', '${escapeHtml(m.session)}', '${escapeHtml(m.name)}', '${escapeHtml(m.tag || '')}', '${escapeHtml(apiUrl)}', '${escapeHtml(apiKey)}', '${escapeHtml(model)}', '${escapeHtml(typeof headers === 'object' ? JSON.stringify(headers).replace(/"/g, '&quot;').replace(/'/g, "\\'") : headers)}')" class="text-blue-500 hover:text-blue-700 text-xs px-2 py-1 rounded hover:bg-blue-50" title="配置">⚙️</button>
+                        ${configBtn}
                         <button onclick="deleteTeamMember('${m.type}', '${escapeHtml(m.session)}', '${escapeHtml(m.name)}')" class="text-red-500 hover:text-red-700 text-xs px-2 py-1 rounded hover:bg-red-50" title="删除成员">🗑️</button>
                     </td>
                 </tr>`;
@@ -5306,6 +5311,8 @@ async function addOpenClawMember() {
             alert('🦞 OpenClaw Agent创建成功！');
             overlay.remove();
             loadTeamMembers();
+            // Auto-open the full config modal (files/tools/channels) for the new agent
+            setTimeout(() => orchShowAgentConfigModal(name), 500);
         } else {
             if (r.status === 409) {
                 alert('⚠️ Agent名称已存在，请使用其他名称');
