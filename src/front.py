@@ -496,15 +496,81 @@ def proxy_openclaw_agent_detail():
         )
         return jsonify(r.json()), r.status_code
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
 @app.route("/proxy_openclaw_skills", methods=["GET"])
 def proxy_openclaw_skills():
-    """Proxy to list all available OpenClaw skills."""
+    """Get OpenClaw skills by combining three sources: workspace skills, managed skills, and bundled skills."""
     try:
-        r = requests.get(f"{OASIS_BASE_URL}/sessions/openclaw/skills", timeout=20)
-        return jsonify(r.json()), r.status_code
+        # Get agent name parameter (optional)
+        agent_name = request.args.get("agent", "")
+        
+        # Call the new OASIS skills endpoint that combines all three sources
+        skills_r = requests.get(
+            f"{OASIS_BASE_URL}/sessions/openclaw/skills",
+            timeout=20,
+        )
+        
+        if skills_r.status_code != 200:
+            return jsonify({"ok": False, "error": "Failed to get skills from OASIS"}), 500
+        
+        skills_data = skills_r.json()
+        
+        # If specific agent is requested, filter skills by agent workspace
+        if agent_name:
+            # Get agent detail to find workspace path
+            agent_detail_r = requests.get(
+                f"{OASIS_BASE_URL}/sessions/openclaw/agent-detail",
+                params={"name": agent_name},
+                timeout=15,
+            )
+            
+            if agent_detail_r.status_code != 200:
+                return jsonify({"ok": False, "error": "Failed to get agent detail"}), 500
+            
+            agent_detail = agent_detail_r.json()
+            workspace = agent_detail.get("workspace", "")
+            
+            # Filter skills to only include those from this agent's workspace
+            if workspace:
+                all_skills = skills_data.get("skills", [])
+                agent_skills = [
+                    skill for skill in all_skills 
+                    if skill.get("path", "").startswith(workspace) or skill.get("source") in ["managed", "bundled"]
+                ]
+                
+                return jsonify({
+                    "ok": True,
+                    "agent": agent_name,
+                    "workspace": workspace,
+                    "skills": agent_skills,
+                    "sources": skills_data.get("sources", {})
+                }), 200
+            else:
+                return jsonify({"ok": False, "error": "Agent workspace not found"}), 404
+        
+        # If no specific agent, return all skills grouped by source
+        else:
+            # Get all OpenClaw agents to provide agent-specific context
+            agents_r = requests.get(
+                f"{OASIS_BASE_URL}/sessions/openclaw",
+                params={"filter": ""},
+                timeout=10,
+            )
+            
+            agents = []
+            if agents_r.status_code == 200:
+                agents_data = agents_r.json()
+                agents = agents_data.get("agents", [])
+            
+            return jsonify({
+                "ok": True,
+                "skills": skills_data.get("skills", []),
+                "sources": skills_data.get("sources", {}),
+                "agents": agents,
+                "message": "Skills loaded from three sources: workspace, managed, and bundled"
+            }), 200
+            
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500            
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 

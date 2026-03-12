@@ -86,6 +86,11 @@ discussions: dict[str, DiscussionForum] = {}
 engines: dict[str, DiscussionEngine] = {}
 tasks: dict[str, asyncio.Task] = {}
 
+# --- Skills cache ---
+_openclaw_skills_cache: dict = {}
+_openclaw_managed_skills_dir: str = ""
+_openclaw_bundled_skills: list = []
+
 
 # --- Helpers ---
 
@@ -94,6 +99,68 @@ def _get_forum_or_404(topic_id: str) -> DiscussionForum:
     if not forum:
         raise HTTPException(404, "Topic not found")
     return forum
+
+
+def _preload_openclaw_skills():
+    """Preload OpenClaw skills information at startup to reduce latency."""
+    global _openclaw_skills_cache, _openclaw_managed_skills_dir, _openclaw_bundled_skills
+    
+    openclaw_bin = shutil.which("openclaw")
+    if not openclaw_bin:
+        print("[OASIS] ⚠️ openclaw CLI not available, skipping skills preload")
+        return
+    
+    try:
+        # Execute openclaw skills list --json command
+        result = subprocess.run(
+            [openclaw_bin, "skills", "list", "--json"],
+            capture_output=True, text=True, timeout=30,
+        )
+        
+        if result.returncode != 0:
+            print(f"[OASIS] ⚠️ openclaw skills list failed: {result.stderr.strip()[:200]}")
+            return
+        
+        # Parse JSON response
+        raw_output = result.stdout
+        idx = raw_output.find('{')
+        if idx < 0:
+            print("[OASIS] ⚠️ Failed to parse openclaw skills list output")
+            return
+        
+        skills_data = json.loads(raw_output[idx:])
+        
+        # Extract managed skills directory
+        _openclaw_managed_skills_dir = skills_data.get("managedSkillsDir", "")
+        
+        # Extract bundled skills
+        all_skills = skills_data.get("skills", [])
+        _openclaw_bundled_skills = [
+            skill for skill in all_skills 
+            if skill.get("source") == "openclaw-bundled"
+        ]
+        
+        # Cache the complete skills data
+        _openclaw_skills_cache = skills_data
+        
+        print(f"[OASIS] ✅ Skills preloaded: {len(all_skills)} total skills, {len(_openclaw_bundled_skills)} bundled skills")
+        print(f"[OASIS] 📁 Managed skills directory: {_openclaw_managed_skills_dir}")
+        
+    except subprocess.TimeoutExpired:
+        print("[OASIS] ⚠️ openclaw skills list command timed out")
+    except Exception as e:
+        print(f"[OASIS] ⚠️ Failed to preload skills: {e}")
+
+
+def _get_complete_skills_info():
+    """Get complete skills information combining all three sources."""
+    return {
+        "workspace_dir": _get_openclaw_workspace_path(),
+        "managed_skills_dir": _openclaw_managed_skills_dir,
+        "bundled_skills": _openclaw_bundled_skills,
+        "total_skills_count": len(_openclaw_bundled_skills) if _openclaw_bundled_skills else 0,
+        "preloaded_at_startup": bool(_openclaw_skills_cache)
+    }
 
 
 def _check_owner(forum: DiscussionForum, user_id: str):
@@ -105,6 +172,10 @@ def _check_owner(forum: DiscussionForum, user_id: str):
 # --- Lifespan ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Preload OpenClaw skills information at startup
+    _preload_openclaw_skills()
+    
+    # Load historical discussions
     loaded = DiscussionForum.load_all()
     discussions.update(loaded)
     print(f"[OASIS] 🏛️ Forum server started (loaded {len(loaded)} historical discussions)")
@@ -1169,62 +1240,172 @@ async def get_openclaw_agent_detail(name: str = Query(...)):
 
 
 @app.get("/sessions/openclaw/skills")
-async def list_openclaw_skills():
-    """Return all available OpenClaw skills via ``openclaw skills list --json``."""
-    if not _OPENCLAW_BIN:
-        return JSONResponse({"ok": False, "error": "openclaw CLI not available"}, status_code=500)
+async def list_openclaw_skills(name: str = Query("", description="Agent name to filter effective skills")):
+    """Return available OpenClaw skills. If *name* is given, return only the
+    skills that are effective for that specific agent (based on its config).
+    Without *name*, return the full combined skill set.
+    """
     try:
-        result = subprocess.run(
-            [_OPENCLAW_BIN, "skills", "list", "--json"],
-            capture_output=True, text=True, timeout=20,
-        )
-        if result.returncode != 0:
-            # Fallback: try without --json
-            result2 = subprocess.run(
-                [_OPENCLAW_BIN, "skills", "list"],
-                capture_output=True, text=True, timeout=20,
-            )
-            if result2.returncode != 0:
-                return JSONResponse({"ok": False, "error": "skills list command failed"}, status_code=500)
-            # Parse text output: lines like "  skill-name  (eligible)"
-            skills = []
-            for line in result2.stdout.splitlines():
-                stripped = line.strip()
-                if not stripped or stripped.startswith("Skills") or stripped.startswith("─"):
-                    continue
-                # Extract skill name (first token)
-                parts = stripped.split()
-                if parts:
-                    sname = parts[0].strip("•-● ")
-                    if sname:
-                        eligible = "eligible" in stripped.lower() or "✓" in stripped
-                        skills.append({"name": sname, "eligible": eligible})
-            return {"ok": True, "skills": skills}
-
-        raw = result.stdout
-        idx = raw.find('{')
-        if idx < 0:
-            idx = raw.find('[')
-        if idx < 0:
-            return {"ok": True, "skills": []}
-        json_str = raw[idx:]
-        data = json.loads(json_str)
-        if isinstance(data, dict):
-            skills_list = data.get("skills", [])
-        elif isinstance(data, list):
-            skills_list = data
-        else:
-            skills_list = []
-        # Normalize
         skills = []
-        for s in skills_list:
-            if isinstance(s, str):
-                skills.append({"name": s, "eligible": True})
-            elif isinstance(s, dict):
-                skills.append({"name": s.get("name", s.get("id", "")), "eligible": s.get("eligible", True)})
-        return {"ok": True, "skills": skills}
+
+        # --- Determine agent-specific workspace & skill config ---
+        agent_workspace = None
+        agent_skills_cfg: list | None = None  # None => skills_all (unrestricted)
+
+        if name:
+            full_config = _fetch_openclaw_full_config()
+            defaults = full_config.get("defaults", {}) if full_config else {}
+            agent_list = full_config.get("list", []) if full_config else []
+            for a in agent_list:
+                if a.get("id") == name or a.get("name") == name:
+                    detail = _build_agent_detail(a, defaults)
+                    agent_workspace = detail.get("workspace") or None
+                    if not detail.get("skills_all"):
+                        agent_skills_cfg = detail.get("skills", [])
+                    break
+
+        # 1. Workspace skills (agent-specific workspace or default)
+        workspace_path = agent_workspace or _get_openclaw_workspace_path()
+        if workspace_path:
+            skills_dir = os.path.join(workspace_path, "skills")
+            if os.path.isdir(skills_dir):
+                for item in os.listdir(skills_dir):
+                    item_path = os.path.join(skills_dir, item)
+                    if os.path.isdir(item_path):
+                        skills.append({
+                            "name": item,
+                            "eligible": True,
+                            "source": "workspace",
+                            "path": item_path
+                        })
+
+        # 2. Managed skills (shared across all agents)
+        if _openclaw_managed_skills_dir and os.path.isdir(_openclaw_managed_skills_dir):
+            for item in os.listdir(_openclaw_managed_skills_dir):
+                item_path = os.path.join(_openclaw_managed_skills_dir, item)
+                if os.path.isdir(item_path):
+                    existing = next((s for s in skills if s["name"] == item), None)
+                    if not existing:
+                        skills.append({
+                            "name": item,
+                            "eligible": True,
+                            "source": "managed",
+                            "path": item_path
+                        })
+
+        # 3. Bundled skills
+        for bundled_skill in _openclaw_bundled_skills:
+            skill_name = bundled_skill.get("name", "")
+            if skill_name:
+                existing = next((s for s in skills if s["name"] == skill_name), None)
+                if not existing:
+                    skills.append({
+                        "name": skill_name,
+                        "eligible": bundled_skill.get("eligible", False),
+                        "source": "bundled",
+                        "description": bundled_skill.get("description", ""),
+                        "emoji": bundled_skill.get("emoji", ""),
+                        "disabled": bundled_skill.get("disabled", False),
+                        "missing": bundled_skill.get("missing", {})
+                    })
+
+        # --- Filter by agent skill config ---
+        if agent_skills_cfg is not None:
+            # Agent has an explicit allowlist — keep only listed skills
+            allowed = set(agent_skills_cfg)
+            skills = [s for s in skills if s["name"] in allowed]
+
+        # Sort by name
+        skills.sort(key=lambda x: x["name"])
+
+        return {
+            "ok": True,
+            "agent": name or None,
+            "skills_all": agent_skills_cfg is None,
+            "skills": skills,
+            "sources": {
+                "workspace": workspace_path,
+                "managed": _openclaw_managed_skills_dir,
+                "bundled_count": len(_openclaw_bundled_skills)
+            }
+        }
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/sessions/openclaw/skills-info")
+async def get_openclaw_skills_info():
+    """Return complete skills information including all three sources and preload status."""
+    try:
+        # Get the combined skills list
+        skills_response = await list_openclaw_skills()
+        if not skills_response.get("ok"):
+            return skills_response
+        
+        # Add detailed information about each source
+        info = {
+            "ok": True,
+            "skills": skills_response["skills"],
+            "sources": {
+                "workspace": {
+                    "path": skills_response["sources"]["workspace"],
+                    "skills_count": len([s for s in skills_response["skills"] if s["source"] == "workspace"])
+                },
+                "managed": {
+                    "path": skills_response["sources"]["managed"],
+                    "skills_count": len([s for s in skills_response["skills"] if s["source"] == "managed"])
+                },
+                "bundled": {
+                    "total_count": skills_response["sources"]["bundled_count"],
+                    "skills_count": len([s for s in skills_response["skills"] if s["source"] == "bundled"])
+                }
+            },
+            "preload_status": {
+                "preloaded_at_startup": bool(_openclaw_skills_cache),
+                "managed_skills_dir": _openclaw_managed_skills_dir,
+                "bundled_skills_count": len(_openclaw_bundled_skills) if _openclaw_bundled_skills else 0,
+                "total_preloaded_skills": len(_openclaw_skills_cache.get("skills", [])) if _openclaw_skills_cache else 0
+            }
+        }
+        
+        return info
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+def _get_openclaw_workspace_path():
+    """Get OpenClaw workspace path from config or default location."""
+    import os
+    import shutil
+    
+    # Try to get workspace from openclaw config
+    openclaw_bin = shutil.which("openclaw")
+    if openclaw_bin:
+        try:
+            result = subprocess.run(
+                [openclaw_bin, "config", "get", "agents.defaults.workspace"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                for line in result.stdout.splitlines():
+                    line = line.strip()
+                    if line and os.path.sep in line:
+                        return line
+        except:
+            pass
+    
+    # Default workspace locations
+    default_paths = [
+        os.path.expanduser("~/.openclaw/workspace"),
+        os.path.expanduser("~/.moltbot/workspace"),
+        "/projects/.openclaw/workspace",
+        "/projects/.moltbot/workspace"
+    ]
+    
+    for path in default_paths:
+        if os.path.isdir(path):
+            return path
+    
+    return None
 
 
 @app.get("/sessions/openclaw/tool-groups")
