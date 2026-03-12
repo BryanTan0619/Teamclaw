@@ -243,19 +243,23 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         orch_shortcuts_body: '拖入专家到画布 · 连接端口=工作流 · Ctrl+G=分组 · 双击快速添加',
         // Orchestration toolbar buttons
         orch_btn_arrange: '🔄 排列',
-        orch_btn_save: '💾 保存',
-        orch_btn_load: '📂 加载',
-        orch_btn_ai: '🤖 AI编排',
-        orch_btn_export: '📋 导出',
+        orch_btn_save: '💾 保存工作流',
+        orch_btn_load: '📂 加载工作流',
+        orch_btn_ai: '🤖 AI优化工作流',
+        orch_btn_export: '📋 复制工作流到粘贴板',
+        orch_btn_download: '⬇️ 导出工作流',
+        orch_btn_upload: '⬆️ 导入工作流',
         orch_btn_status: '🔄 状态',
-        orch_btn_clear: '🗑️ 清空',
+        orch_btn_clear: '🗑️ 清空工作流',
         orch_tip_arrange: '自动排列',
-        orch_tip_save: '保存布局',
-        orch_tip_load: '加载布局',
-        orch_tip_ai: 'AI 生成 YAML',
-        orch_tip_export: '复制 YAML',
+        orch_tip_save: '保存工作流',
+        orch_tip_load: '加载工作流',
+        orch_tip_ai: 'AI优化工作流',
+        orch_tip_export: '复制工作流到粘贴板',
+        orch_tip_download: '导出工作流',
+        orch_tip_upload: '导入工作流',
         orch_tip_status: '刷新 session 状态',
-        orch_tip_clear: '清空画布',
+        orch_tip_clear: '清空工作流',
         // Canvas hints
         orch_hint_drag: '拖入专家开始编排',
         // Nav controls
@@ -729,19 +733,19 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         orch_shortcuts_body: 'Drag expert to canvas · Connect ports=workflow · Ctrl+G=group · Double-click to add',
         // Orchestration toolbar buttons
         orch_btn_arrange: '🔄 Arrange',
-        orch_btn_save: '💾 Save',
-        orch_btn_load: '📂 Load',
-        orch_btn_ai: '🤖 AI Orch',
-        orch_btn_export: '📋 Export',
+        orch_btn_save: '💾 Save Workflow',
+        orch_btn_load: '📂 Load Workflow',
+        orch_btn_ai: '🤖 AI Optimize Workflow',
+        orch_btn_export: '📋 Copy Workflow to Clipboard',
         orch_btn_status: '🔄 Status',
-        orch_btn_clear: '🗑️ Clear',
+        orch_btn_clear: '🗑️ Clear Workflow',
         orch_tip_arrange: 'Auto arrange',
-        orch_tip_save: 'Save layout',
-        orch_tip_load: 'Load layout',
-        orch_tip_ai: 'AI generate YAML',
-        orch_tip_export: 'Copy YAML',
+        orch_tip_save: 'Save workflow',
+        orch_tip_load: 'Load workflow',
+        orch_tip_ai: 'AI optimize workflow',
+        orch_tip_export: 'Copy workflow to clipboard',
         orch_tip_status: 'Refresh session status',
-        orch_tip_clear: 'Clear canvas',
+        orch_tip_clear: 'Clear workflow',
         // Canvas hints
         orch_hint_drag: 'Drag experts to start orchestrating',
         // Nav controls
@@ -863,10 +867,10 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         orch_toast_expert_del_fail: 'Delete failed',
         orch_toast_added_mobile: 'added to canvas',
         // YAML file operations
-        orch_btn_download: '⬇️ Download',
-        orch_btn_upload: '⬆️ Upload',
-        orch_tip_download: 'Download YAML file',
-        orch_tip_upload: 'Upload YAML file',
+        orch_btn_download: '⬇️ Export Workflow',
+        orch_btn_upload: '⬆️ Import Workflow',
+        orch_tip_download: 'Export workflow',
+        orch_tip_upload: 'Import workflow',
         orch_toast_yaml_downloaded: 'YAML file downloaded',
         orch_toast_yaml_uploaded: 'YAML imported: {name}',
         orch_toast_yaml_upload_fail: 'YAML import failed',
@@ -4062,9 +4066,7 @@ async function openGroup(teamName) {
     groupLastMsgId = 0;
     stopGroupPolling();
 
-    // Hide team members overlay if shown
     let overlay = document.getElementById('team-members-overlay');
-    if (overlay) overlay.style.display = 'none';
 
     // Mobile: switch to chat view
     document.getElementById('page-group').classList.add('mobile-chat-open');
@@ -4079,13 +4081,8 @@ async function openGroup(teamName) {
 
     // 清空消息框内容（保留成员表格）
     const box = document.getElementById('group-messages-box');
-    overlay = document.getElementById('team-members-overlay');
-    if (overlay) {
-        overlay.style.display = 'none';
-    }
     box.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:40px 0;font-size:13px;">暂无消息</div>' +
-        '<div id="team-members-overlay" class="team-members-overlay" style="display:none;">' +
-        '<div class="team-members-header">' +
+        '<div id="team-members-overlay" class="team-members-overlay" style="display:flex;">'+        '<div class="team-members-header">' +
         '<div style="display:flex;align-items:center;gap:8px;">' +
         '<button id="team-tab-members" onclick="switchTeamTab(\'members\')" style="padding:4px 12px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid #2563eb;background:#2563eb;color:white;">👥 成员</button>' +
         '<button id="team-tab-experts" onclick="switchTeamTab(\'experts\')" style="padding:4px 12px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid #d1d5db;background:#f9fafb;color:#374151;">🧑‍💼 专家池</button>' +
@@ -4137,6 +4134,9 @@ async function openGroup(teamName) {
     // 清空成员列表
     document.getElementById('group-current-members').innerHTML = '<div class="text-xs text-gray-400 p-2">加载中...</div>';
     document.getElementById('group-available-sessions').innerHTML = '<div class="text-xs text-gray-400 p-2">加载中...</div>';
+
+    // 默认加载并显示成员表
+    loadTeamMembers();
 
     // 更新团队列表选中状态
     loadGroupList();

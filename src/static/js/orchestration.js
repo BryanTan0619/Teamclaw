@@ -82,7 +82,7 @@ function _orchTeamQuery() {
 
 // ── Team management functions ──
 function orchShowTeamButtons(show) {
-    const btns = ['orch-team-create-btn', 'orch-team-delete-btn', 'orch-team-download-btn', 'orch-team-upload-btn'];
+    const btns = ['orch-team-create-btn'];
     btns.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = show ? '' : 'none';
@@ -332,6 +332,7 @@ function orchSetNodeSelector(node) {
 }
 
 function orchInit() {
+    orchLoadTeamList();
     orchLoadExperts();
     orchLoadSessionAgents();
     orchLoadOpenClawSessions();

@@ -259,13 +259,13 @@
                                 <span id="group-active-id" class="text-[10px] text-gray-400 ml-1"></span>
                             </div>
                             <div class="flex items-center gap-2">
-                                <button id="team-download-btn" onclick="downloadTeam()" class="text-xs bg-green-50 text-green-600 hover:bg-green-100 px-2 py-1 rounded border border-green-200" title="下载团队">📥 下载</button>
-                                <button id="team-upload-btn" onclick="document.getElementById('team-upload-input').click()" class="text-xs bg-purple-50 text-purple-600 hover:bg-purple-100 px-2 py-1 rounded border border-purple-200" title="上传团队">📤 上传</button>
+<button id="team-download-btn" onclick="downloadTeam()" class="text-xs bg-green-50 text-green-600 hover:bg-green-100 px-2 py-1 rounded border border-green-200" title="导出团队">📥 导出团队</button>
+<button id="team-upload-btn" onclick="document.getElementById('team-upload-input').click()" class="text-xs bg-purple-50 text-purple-600 hover:bg-purple-100 px-2 py-1 rounded border border-purple-200" title="导入团队">📤 导入团队</button>
                                 <input type="file" id="team-upload-input" accept=".zip" style="display:none;" onchange="uploadTeam(this)">
                                 <button onclick="toggleTeamMembersView()" class="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 px-2 py-1 rounded border border-blue-200" title="团队成员">👥 成员</button>
                                 <button onclick="orchOpenClawQuickConfig()" class="text-xs bg-purple-50 text-purple-600 hover:bg-purple-100 px-2 py-1 rounded border border-purple-200" title="OpenClaw Agent 配置">🦞</button>
-                                <button id="group-mute-btn" onclick="toggleGroupMute()" class="text-xs px-2 py-1 rounded border font-bold" style="background:#fef2f2;color:#dc2626;border-color:#fecaca;" data-i18n="group_mute">🔇 急停</button>
-                                <button onclick="deleteTeam()" class="text-xs bg-red-50 text-red-600 hover:bg-red-100 px-2 py-1 rounded border border-red-200" title="删除团队">🗑️</button>
+<button id="group-mute-btn" onclick="toggleGroupMute()" class="text-xs px-2 py-1 rounded border font-bold" style="display:none;background:#fef2f2;color:#dc2626;border-color:#fecaca;" data-i18n="group_mute">🔇 急停</button>
+<button onclick="deleteTeam()" class="text-xs bg-red-50 text-red-600 hover:bg-red-100 px-2 py-1 rounded border border-red-200" title="删除团队" style="display:none;">🗑️</button>
                             </div>
                         </div>
                         <div id="group-messages-box" class="group-messages-box">
@@ -298,7 +298,8 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="group-input-area" style="position:relative;">
+                        <!-- Group chat input hidden: not in use for now -->
+                        <div class="group-input-area" style="position:relative; display:none;">
                             <div class="mention-popup" id="mention-popup">
                                 <div class="mention-title">@ 选择要通知的 Agent</div>
                                 <div id="mention-list"></div>
@@ -422,25 +423,21 @@
                     <!-- Toolbar -->
                     <div class="orch-toolbar">
                         <button onclick="orchAutoArrange()" class="orch-btn" data-i18n-title="orch_tip_arrange" title="自动排列"><span data-i18n="orch_btn_arrange">🔄 排列</span></button>
-                        <button onclick="orchSaveLayout()" class="orch-btn" data-i18n-title="orch_tip_save" title="保存布局"><span data-i18n="orch_btn_save">💾 保存</span></button>
-                        <button onclick="orchLoadLayout()" class="orch-btn" data-i18n-title="orch_tip_load" title="加载布局"><span data-i18n="orch_btn_load">📂 加载</span></button>
-                        <button onclick="orchGenerateAgentYaml()" class="orch-btn orch-btn-primary" data-i18n-title="orch_tip_ai" title="AI 生成 YAML"><span data-i18n="orch_btn_ai">🤖 AI编排</span></button>
-                        <button onclick="orchExportYaml()" class="orch-btn orch-btn-primary" data-i18n-title="orch_tip_export" title="复制 YAML"><span data-i18n="orch_btn_export">📋 导出</span></button>
-                        <button onclick="orchDownloadYaml()" class="orch-btn" data-i18n-title="orch_tip_download" title="下载 YAML 文件"><span data-i18n="orch_btn_download">⬇️ 下载</span></button>
-                        <button onclick="orchUploadYamlClick()" class="orch-btn" data-i18n-title="orch_tip_upload" title="上传 YAML 文件"><span data-i18n="orch_btn_upload">⬆️ 上传</span></button>
+                        <button onclick="orchSaveLayout()" class="orch-btn" data-i18n-title="orch_tip_save" title="保存工作流"><span data-i18n="orch_btn_save">💾 保存工作流</span></button>
+                        <button onclick="orchLoadLayout()" class="orch-btn" data-i18n-title="orch_tip_load" title="加载工作流"><span data-i18n="orch_btn_load">📂 加载工作流</span></button>
+                        <button onclick="orchGenerateAgentYaml()" class="orch-btn orch-btn-primary" data-i18n-title="orch_tip_ai" title="AI 优化工作流"><span data-i18n="orch_btn_ai">🤖 AI优化工作流</span></button>
+                        <button onclick="orchExportYaml()" class="orch-btn orch-btn-primary" data-i18n-title="orch_tip_export" title="复制工作流到粘贴板"><span data-i18n="orch_btn_export">📋 复制工作流到粘贴板</span></button>
+                        <button onclick="orchDownloadYaml()" class="orch-btn" data-i18n-title="orch_tip_download" title="导出工作流"><span data-i18n="orch_btn_download">⬇️ 导出工作流</span></button>
+                        <button onclick="orchUploadYamlClick()" class="orch-btn" data-i18n-title="orch_tip_upload" title="导入工作流"><span data-i18n="orch_btn_upload">⬆️ 导入工作流</span></button>
                         <input type="file" id="orch-yaml-upload-input" accept=".yaml,.yml" style="display:none;" onchange="orchHandleYamlUpload(event)">
                         <button onclick="orchRefreshSessions()" class="orch-btn" data-i18n-title="orch_tip_status" title="刷新 session 状态"><span data-i18n="orch_btn_status">🔄 状态</span></button>
-                        <button onclick="orchClearCanvas()" class="orch-btn orch-btn-danger" data-i18n-title="orch_tip_clear" title="清空画布"><span data-i18n="orch_btn_clear">🗑️ 清空</span></button>
+                        <button onclick="orchClearCanvas()" class="orch-btn orch-btn-danger" data-i18n-title="orch_tip_clear" title="清空工作流"><span data-i18n="orch_btn_clear">🗑️ 清空工作流</span></button>
                         <button onclick="toggleOrchFocusMode()" id="orch-focus-btn" class="orch-btn" title="专注模式：隐藏两侧面板"><span data-i18n="orch_btn_focus">🎯 专注</span></button>
                         <span class="orch-toolbar-sep" style="border-left:1px solid #d1d5db;height:20px;margin:0 4px;"></span>
                         <label class="text-xs text-gray-600 whitespace-nowrap">选择team:</label>
-                        <select id="orch-team-select" class="px-2 py-1 text-xs border border-gray-300 rounded" style="width:120px;" onchange="orchTeamSelectChanged()" onfocus="orchLoadTeamList()">
+                        <select id="orch-team-select" class="px-2 py-1 text-xs border border-gray-300 rounded" style="width:120px;" onchange="orchTeamSelectChanged()">
                             <option value="">(公共)</option>
                         </select>
-                        <button onclick="orchDeleteTeam()" id="orch-team-delete-btn" class="orch-btn orch-btn-danger" style="display:none;font-size:11px;padding:4px 8px;" title="Delete current team"><span data-i18n="orch_btn_delete_team">🗑️ Delete</span></button>
-                        <button onclick="orchDownloadSnapshot()" id="orch-team-download-btn" class="orch-btn" style="display:none;font-size:11px;padding:4px 8px;" title="Download team snapshot"><span data-i18n="orch_btn_download_snapshot">⬇️ Snapshot</span></button>
-                        <button onclick="orchUploadSnapshotClick()" id="orch-team-upload-btn" class="orch-btn" style="display:none;font-size:11px;padding:4px 8px;" title="Upload team snapshot"><span data-i18n="orch_btn_upload_snapshot">⬆️ Upload</span></button>
-                        <input type="file" id="orch-team-snapshot-input" accept=".zip" style="display:none;" onchange="orchHandleSnapshotUpload(event)">
                     </div>
                     <div class="orch-canvas" id="orch-canvas-area">
                         <!-- 移动端 toggle 按钮 -->
