@@ -4392,6 +4392,12 @@ async function loadTeamMembers() {
             const typeBadge = m.type === 'oasis' 
                 ? '<span class="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded">Oasis</span>'
                 : '<span class="text-xs bg-green-50 text-green-600 px-2 py-1 rounded">Ext</span>';
+            const meta = m.meta || {};
+            const apiUrl = meta.api_url || '';
+            const apiKey = meta.api_key || '';
+            const model = meta.model || '';
+            const headers = meta.headers || {};
+            
             return `
                 <tr>
                     <td class="font-medium text-gray-800">${escapeHtml(m.name)}</td>
@@ -4399,7 +4405,8 @@ async function loadTeamMembers() {
                     <td>${escapeHtml(m.tag || '-')}</td>
                     <td class="font-mono text-xs text-gray-500">${escapeHtml(m.session || '-')}</td>
                     <td style="text-align:right;">
-                        <button onclick="deleteTeamMember('${m.type}', '${escapeHtml(m.session)}', '${escapeHtml(m.name)}')" class="text-red-500 hover:text-red-700 text-xs px-2 py-1 rounded hover:bg-red-50" title="删除成员">🗑️ 删除</button>
+                        <button onclick="showAgentConfigModal('${m.type}', '${escapeHtml(m.session)}', '${escapeHtml(m.name)}', '${escapeHtml(m.tag || '')}', '${escapeHtml(apiUrl)}', '${escapeHtml(apiKey)}', '${escapeHtml(model)}', '${escapeHtml(typeof headers === 'object' ? JSON.stringify(headers).replace(/"/g, '&quot;').replace(/'/g, "\\'") : headers)}')" class="text-blue-500 hover:text-blue-700 text-xs px-2 py-1 rounded hover:bg-blue-50" title="配置">⚙️</button>
+                        <button onclick="deleteTeamMember('${m.type}', '${escapeHtml(m.session)}', '${escapeHtml(m.name)}')" class="text-red-500 hover:text-red-700 text-xs px-2 py-1 rounded hover:bg-red-50" title="删除成员">🗑️</button>
                     </td>
                 </tr>`;
         }).join('');
@@ -4508,57 +4515,116 @@ function showAddTeamMemberModal() {
     }
     
     const overlay = document.createElement('div');
-    overlay.className = 'team-members-modal-overlay';
+    overlay.className = 'orch-modal-overlay';
     overlay.id = 'add-team-member-overlay';
     overlay.innerHTML = `
-        <div class="team-members-modal">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-                <h3 style="margin:0;font-size:16px;font-weight:600;">➕ 添加成员</h3>
-                <button onclick="document.getElementById('add-team-member-overlay').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">✕</button>
-            </div>
+        <div class="orch-modal" style="min-width:380px;max-width:460px;">
+            <h3>➕ 添加成员</h3>
             
-            <div style="display:flex;gap:8px;margin-bottom:16px;">
-                <button id="tab-oasis" onclick="switchAddMemberTab('oasis')" style="flex:1;padding:8px;border:1px solid #d1d5db;border-radius:6px;background:#3b82f6;color:white;font-size:13px;cursor:pointer;">Oasis Agent</button>
-                <button id="tab-external" onclick="switchAddMemberTab('external')" style="flex:1;padding:8px;border:1px solid #d1d5db;border-radius:6px;background:#f9fafb;color:#374151;font-size:13px;cursor:pointer;">External Agent</button>
+            <div style="display:flex;gap:8px;margin-bottom:12px;">
+                <button id="tab-oasis" onclick="switchAddMemberTab('oasis')" style="flex:1;padding:8px;border:1px solid #d1d5db;border-radius:6px;background:#2563eb;color:white;font-size:12px;cursor:pointer;">Oasis Agent</button>
+                <button id="tab-external" onclick="switchAddMemberTab('external')" style="flex:1;padding:8px;border:1px solid #d1d5db;border-radius:6px;background:#f9fafb;color:#374151;font-size:12px;cursor:pointer;">External Agent</button>
             </div>
             
             <!-- Oasis Agent Form -->
             <div id="form-oasis">
-                <div style="margin-bottom:12px;">
-                    <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">会话ID (Session ID)</label>
-                    <input type="text" id="add-oasis-session" placeholder="输入会话ID" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                    <label style="font-size:11px;font-weight:600;color:#374151;">会话ID (Session ID)
+                        <input id="add-oasis-session" type="text" placeholder="输入会话ID" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;">
+                    </label>
+                    <label style="font-size:11px;font-weight:600;color:#374151;">名称
+                        <input id="add-oasis-name" type="text" placeholder="输入Agent名称" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;">
+                    </label>
+                    <label style="font-size:11px;font-weight:600;color:#374151;">标签 (Tag)
+                        <select id="add-oasis-tag" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;background:white;">
+                            <option value="">(无标签)</option>
+                        </select>
+                    </label>
+                    <div id="add-oasis-drop-zone" style="border:2px dashed #d1d5db;border-radius:8px;padding:12px;text-align:center;font-size:11px;color:#9ca3af;cursor:default;transition:all .15s;">
+                        📦 拖入专家设置标签
+                    </div>
                 </div>
-                <div style="margin-bottom:16px;">
-                    <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">名称</label>
-                    <input type="text" id="add-oasis-name" placeholder="输入Agent名称" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                <div class="orch-modal-btns" style="margin-top:12px;">
+                    <button onclick="document.getElementById('add-team-member-overlay').remove()" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;font-size:12px;">取消</button>
+                    <button onclick="addOasisMember()" style="padding:6px 14px;border-radius:6px;border:none;background:#2563eb;color:white;cursor:pointer;font-size:12px;">添加</button>
                 </div>
-                <div style="margin-bottom:16px;">
-                    <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">标签 (Tag)</label>
-                    <input type="text" id="add-oasis-tag" placeholder="如: finance" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
-                </div>
-                <button onclick="addOasisMember()" style="width:100%;padding:10px;background:#3b82f6;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">添加 Oasis Agent</button>
             </div>
             
             <!-- External Agent Form -->
             <div id="form-external" style="display:none;">
-                <div style="margin-bottom:12px;">
-                    <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">名称</label>
-                    <input type="text" id="add-ext-name" placeholder="输入Agent名称" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                    <label style="font-size:11px;font-weight:600;color:#374151;">名称
+                        <input id="add-ext-name" type="text" placeholder="输入Agent名称" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;">
+                    </label>
+                    <label style="font-size:11px;font-weight:600;color:#374151;">会话ID (Session ID)
+                        <input id="add-ext-session" type="text" placeholder="输入会话ID" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;">
+                    </label>
+                    <label style="font-size:11px;color:#9ca3af;margin-bottom:2px;margin-top:8px;display:block;">API URL *</label>
+                    <input id="add-ext-url" type="text" placeholder="https://api.example.com/v1" style="font-family:monospace;font-size:12px;width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;">
+                    <label style="font-size:11px;color:#9ca3af;margin-bottom:2px;margin-top:8px;display:block;">API Key</label>
+                    <input id="add-ext-key" type="text" placeholder="sk-xxx (optional)" style="font-family:monospace;font-size:12px;width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;">
+                    <label style="font-size:11px;color:#9ca3af;margin-bottom:2px;margin-top:8px;display:block;">Model</label>
+                    <input id="add-ext-model" type="text" placeholder="gpt-4 / deepseek-chat (optional)" style="font-family:monospace;font-size:12px;width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;">
+                    <label style="font-size:11px;color:#9ca3af;margin-bottom:2px;margin-top:8px;display:block;">Headers (JSON)</label>
+                    <textarea id="add-ext-headers" placeholder='{"X-Custom": "value"}' style="font-family:monospace;font-size:11px;min-height:60px;width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;"></textarea>
                 </div>
-                <div style="margin-bottom:16px;">
-                    <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">标签 (Tag)</label>
-                    <input type="text" id="add-ext-tag" placeholder="如: openclaw" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+                <div class="orch-modal-btns" style="margin-top:12px;">
+                    <button onclick="document.getElementById('add-team-member-overlay').remove()" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;font-size:12px;">取消</button>
+                    <button onclick="addExternalMember()" style="padding:6px 14px;border-radius:6px;border:none;background:#10b981;color:white;cursor:pointer;font-size:12px;">添加</button>
                 </div>
-                <div style="margin-bottom:16px;">
-                    <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">会话ID (Session ID)</label>
-                    <input type="text" id="add-ext-session" placeholder="输入会话ID" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
-                </div>
-                <button onclick="addExternalMember()" style="width:100%;padding:10px;background:#10b981;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">添加 External Agent</button>
             </div>
         </div>
     `;
     
     document.body.appendChild(overlay);
+    
+    // Load expert tags for Oasis Agent select options
+    (async () => {
+        try {
+            const r = await fetch('/proxy_visual/experts');
+            const experts = await r.json();
+            const tags = [...new Set(experts.map(e => e.tag).filter(Boolean))];
+            const options = '<option value="">(无标签)</option>' +
+                tags.map(t => `<option value="${t}">${t}</option>`).join('');
+            
+            const oasisTagSelect = document.getElementById('add-oasis-tag');
+            if (oasisTagSelect) oasisTagSelect.innerHTML = options;
+        } catch (e) {
+            console.warn('Failed to load expert tags', e);
+        }
+    })();
+    
+    // Setup drop zone for Oasis Agent
+    const dropZone = document.getElementById('add-oasis-drop-zone');
+    if (dropZone) {
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            dropZone.style.borderColor = '#2563eb';
+            dropZone.style.background = '#eff6ff';
+        });
+        
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.style.borderColor = '#d1d5db';
+            dropZone.style.background = '';
+        });
+        
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = '#d1d5db';
+            dropZone.style.background = '';
+            try {
+                const data = JSON.parse(e.dataTransfer.getData('application/json'));
+                if (data.tag && data.tag !== 'manual' && data.tag !== 'conditional') {
+                    const tagSelect = document.getElementById('add-oasis-tag');
+                    tagSelect.value = data.tag;
+                    dropZone.innerHTML = '✅ Tag: <b>' + escapeHtml(data.tag) + '</b> (' + escapeHtml(data.name || '') + ')';
+                    dropZone.style.borderColor = '#2563eb';
+                    dropZone.style.color = '#374151';
+                }
+            } catch(err) {}
+        });
+    }
     
     // Click outside to close
     overlay.addEventListener('click', (e) => {
@@ -4572,7 +4638,7 @@ function switchAddMemberTab(tab) {
     document.getElementById('form-oasis').style.display = tab === 'oasis' ? 'block' : 'none';
     document.getElementById('form-external').style.display = tab === 'external' ? 'block' : 'none';
     
-    document.getElementById('tab-oasis').style.background = tab === 'oasis' ? '#3b82f6' : '#f9fafb';
+    document.getElementById('tab-oasis').style.background = tab === 'oasis' ? '#2563eb' : '#f9fafb';
     document.getElementById('tab-oasis').style.color = tab === 'oasis' ? 'white' : '#374151';
     document.getElementById('tab-external').style.background = tab === 'external' ? '#10b981' : '#f9fafb';
     document.getElementById('tab-external').style.color = tab === 'external' ? 'white' : '#374151';
@@ -4618,12 +4684,30 @@ async function addOasisMember() {
 
 async function addExternalMember() {
     const name = document.getElementById('add-ext-name').value.trim();
-    const tag = document.getElementById('add-ext-tag').value.trim();
     const session = document.getElementById('add-ext-session').value.trim();
+    const apiUrl = document.getElementById('add-ext-url').value.trim();
+    const apiKey = document.getElementById('add-ext-key').value.trim();
+    const model = document.getElementById('add-ext-model').value.trim();
+    const headersStr = document.getElementById('add-ext-headers').value.trim();
     
     if (!name || !session) {
         alert('请输入名称和会话ID');
         return;
+    }
+    
+    if (!apiUrl) {
+        alert('API URL 不能为空');
+        return;
+    }
+    
+    let headers = {};
+    if (headersStr) {
+        try {
+            headers = JSON.parse(headersStr);
+        } catch (e) {
+            alert('Headers JSON 解析错误: ' + e.message);
+            return;
+        }
     }
     
     try {
@@ -4633,8 +4717,11 @@ async function addExternalMember() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 name: name,
-                tag: tag || '',
-                session: session
+                session: session,
+                api_url: apiUrl,
+                api_key: apiKey,
+                model: model,
+                headers: headers
             })
         });
         
@@ -4760,4 +4847,188 @@ function toggleOrchFocusMode() {
     sidebar.classList.toggle('focus-hidden', !isFocused);
     panel.classList.toggle('focus-hidden', !isFocused);
     if (btn) btn.classList.toggle('focus-active', !isFocused);
+}
+
+// Agent 配置模态框
+let currentConfigAgent = null;
+
+async function showAgentConfigModal(type, session, name, tag, api_url, api_key, model, headers) {
+    currentConfigAgent = { type, session, name, tag, api_url, api_key, model, headers };
+    
+    // Create modal dynamically like orchestration page
+    const overlay = document.createElement('div');
+    overlay.className = 'orch-modal-overlay';
+    overlay.id = 'agent-config-overlay';
+    
+    const typeLabel = type === 'oasis' ? 'Oasis Agent' : 'External Agent';
+    
+    // External Agent form fields (like orchestration page)
+    const externalForm = type === 'external' ? `
+        <label style="font-size:11px;color:#9ca3af;margin-bottom:2px;margin-top:8px;display:block;">API URL *</label>
+        <input id="config-ext-url" type="text" value="${escapeHtml(api_url || '')}" placeholder="https://api.example.com/v1" style="font-family:monospace;font-size:12px;width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;">
+        <label style="font-size:11px;color:#9ca3af;margin-bottom:2px;margin-top:8px;display:block;">API Key</label>
+        <input id="config-ext-key" type="text" value="${escapeHtml(api_key || '')}" placeholder="sk-xxx (optional)" style="font-family:monospace;font-size:12px;width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;">
+        <label style="font-size:11px;color:#9ca3af;margin-bottom:2px;margin-top:8px;display:block;">Model</label>
+        <input id="config-ext-model" type="text" value="${escapeHtml(model || '')}" placeholder="gpt-4 / deepseek-chat (optional)" style="font-family:monospace;font-size:12px;width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;">
+        <label style="font-size:11px;color:#9ca3af;margin-bottom:2px;margin-top:8px;display:block;">Headers (JSON)</label>
+        <textarea id="config-ext-headers" placeholder='{"X-Custom": "value"}' style="font-family:monospace;font-size:11px;min-height:60px;width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;">${escapeHtml(typeof headers === 'object' ? JSON.stringify(headers, null, 2) : headers || '')}</textarea>
+    ` : '';
+    
+    // Oasis Agent tag section
+    const tagSection = type === 'oasis' ? `
+        <label style="font-size:11px;font-weight:600;color:#374151;">标签 (Tag)</label>
+        <select id="config-agent-tag" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;background:white;">
+            <option value="">(无标签)</option>
+        </select>
+        <div id="config-tag-drop-zone" style="border:2px dashed #d1d5db;border-radius:8px;padding:12px;text-align:center;font-size:11px;color:#9ca3af;cursor:default;transition:all .15s;margin-top:8px;">
+            📦 拖入专家设置标签
+        </div>
+    ` : '';
+    
+    overlay.innerHTML = `
+        <div class="orch-modal" style="min-width:380px;max-width:460px;">
+            <h3>⚙️ ${type === 'external' ? '🌐 ' : ''}配置成员 — ${typeLabel}</h3>
+            <div style="display:flex;flex-direction:column;gap:8px;margin:10px 0;">
+                <label style="font-size:11px;font-weight:600;color:#374151;">类型</label>
+                <div id="config-agent-type" style="padding:6px 8px;background:#f3f4f6;border-radius:6px;font-size:12px;color:#374151;">${typeLabel}</div>
+                
+                <label style="font-size:11px;font-weight:600;color:#374151;">名称</label>
+                <input id="config-agent-name" type="text" placeholder="输入成员名称" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;">
+                
+                ${tagSection}
+                ${externalForm}
+                
+                <label style="font-size:11px;font-weight:600;color:#374151;">会话ID (Session ID)</label>
+                <input id="config-agent-session" type="text" value="${session}" disabled style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;background:#f3f4f6;cursor:not-allowed;color:#9ca3af;">
+            </div>
+            <div class="orch-modal-btns">
+                <button id="config-cancel" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;cursor:pointer;font-size:12px;">取消</button>
+                <button id="config-save" style="padding:6px 14px;border-radius:6px;border:none;background:${type === 'external' ? '#10b981' : '#2563eb'};color:white;cursor:pointer;font-size:12px;">保存</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    
+    // Set initial values
+    document.getElementById('config-agent-name').value = name;
+    
+    // Setup event handlers
+    overlay.querySelector('#config-cancel').addEventListener('click', () => {
+        overlay.remove();
+        currentConfigAgent = null;
+    });
+    
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) {
+            overlay.remove();
+            currentConfigAgent = null;
+        }
+    });
+    
+    overlay.querySelector('#config-save').addEventListener('click', async () => {
+        const newName = document.getElementById('config-agent-name').value.trim();
+        
+        if (!newName) {
+            alert('名称不能为空');
+            return;
+        }
+        
+        const meta = { name: newName };
+        
+        // Oasis Agent: save tag
+        if (type === 'oasis') {
+            const newTag = document.getElementById('config-agent-tag').value.trim();
+            meta.tag = newTag;
+        } else {
+            // External Agent: save api_url, api_key, model, headers
+            const extUrl = document.getElementById('config-ext-url').value.trim();
+            if (!extUrl) {
+                alert('API URL 不能为空');
+                return;
+            }
+            meta.api_url = extUrl;
+            meta.api_key = document.getElementById('config-ext-key').value.trim();
+            meta.model = document.getElementById('config-ext-model').value.trim();
+            
+            const hdrsStr = document.getElementById('config-ext-headers').value.trim();
+            if (hdrsStr) {
+                try {
+                    meta.headers = JSON.parse(hdrsStr);
+                } catch (e) {
+                    alert('Headers JSON 解析错误: ' + e.message);
+                    return;
+                }
+            } else {
+                meta.headers = {};
+            }
+        }
+        
+        try {
+            const url = `/internal_agents/${encodeURIComponent(session)}?team=${encodeURIComponent(currentGroupId)}`;
+            const resp = await fetch(url, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ meta })
+            });
+            
+            if (!resp.ok) {
+                const err = await resp.json();
+                alert('保存失败: ' + (err.error || '未知错误'));
+                return;
+            }
+            
+            alert('保存成功！');
+            overlay.remove();
+            currentConfigAgent = null;
+            loadTeamMembers();
+        } catch (e) {
+            alert('保存失败: ' + e.message);
+        }
+    });
+    
+    // Load expert tags for Oasis Agent
+    if (type === 'oasis') {
+        try {
+            const r = await fetch('/proxy_visual/experts');
+            const experts = await r.json();
+            const tags = [...new Set(experts.map(e => e.tag).filter(Boolean))];
+            const tagSelect = document.getElementById('config-agent-tag');
+            tagSelect.innerHTML = '<option value="">(无标签)</option>' +
+                tags.map(t => `<option value="${t}">${t}</option>`).join('');
+            tagSelect.value = tag || '';
+        } catch (e) {
+            console.warn('Failed to load expert tags', e);
+        }
+        
+        // Setup drop zone for expert tags
+        const dropZone = document.getElementById('config-tag-drop-zone');
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            dropZone.style.borderColor = '#2563eb';
+            dropZone.style.background = '#eff6ff';
+        });
+        
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.style.borderColor = '#d1d5db';
+            dropZone.style.background = '';
+        });
+        
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = '#d1d5db';
+            dropZone.style.background = '';
+            try {
+                const data = JSON.parse(e.dataTransfer.getData('application/json'));
+                if (data.tag && data.tag !== 'manual' && data.tag !== 'conditional') {
+                    const tagSelect = document.getElementById('config-agent-tag');
+                    tagSelect.value = data.tag;
+                    dropZone.innerHTML = '✅ Tag: <b>' + escapeHtml(data.tag) + '</b> (' + escapeHtml(data.name || '') + ')';
+                    dropZone.style.borderColor = '#2563eb';
+                    dropZone.style.color = '#374151';
+                }
+            } catch(err) {}
+        });
+    }
 }

@@ -333,6 +333,129 @@ header {
     border-bottom: none;
 }
 
+/* Agent配置模态框样式 */
+.agent-config-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+.agent-config-modal-content {
+    background: white;
+    border-radius: 12px;
+    width: 100%;
+    max-width: 500px;
+    max-height: 90vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+.agent-config-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    border-bottom: 1px solid #e5e7eb;
+}
+.agent-config-modal-header h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+}
+.agent-config-modal-header button {
+    background: none;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    transition: background-color 0.15s;
+}
+.agent-config-modal-header button:hover {
+    background: #f3f4f6;
+}
+.agent-config-modal-body {
+    padding: 24px;
+    overflow-y: auto;
+}
+.agent-config-form-group {
+    margin-bottom: 20px;
+}
+.agent-config-form-group:last-child {
+    margin-bottom: 0;
+}
+.agent-config-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    color: #374151;
+    margin-bottom: 8px;
+}
+.agent-config-input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    font-size: 14px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    box-sizing: border-box;
+}
+.agent-config-input:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+.agent-config-type-display {
+    padding: 10px 12px;
+    background: #f3f4f6;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #6b7280;
+}
+.agent-config-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 20px 24px;
+    border-top: 1px solid #e5e7eb;
+}
+.agent-config-btn {
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    transition: all 0.15s;
+}
+.agent-config-btn-secondary {
+    background: #f3f4f6;
+    color: #6b7280;
+}
+.agent-config-btn-secondary:hover {
+    background: #e5e7eb;
+    color: #374151;
+}
+.agent-config-btn-primary {
+    background: #3b82f6;
+    color: white;
+}
+.agent-config-btn-primary:hover {
+    background: #2563eb;
+}
+
+
 /* Team Members Modal */
 .team-members-modal-overlay {
     position: fixed;

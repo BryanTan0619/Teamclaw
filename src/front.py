@@ -1961,7 +1961,8 @@ def get_team_members(team_name):
                             "name": agent.get("name", ""),
                             "type": "ext",
                             "tag": agent.get("tag", ""),
-                            "session": agent.get("session", "")
+                            "session": agent.get("session", ""),
+                            "meta": agent.get("meta", {})
                         })
         
         return jsonify({
@@ -1993,6 +1994,10 @@ def add_external_member(team_name):
     name = body.get("name", "")
     tag = body.get("tag", "")
     session = body.get("session", "")
+    api_url = body.get("api_url", "")
+    api_key = body.get("api_key", "")
+    model = body.get("model", "")
+    headers = body.get("headers", {})
     
     if not name or not session:
         return jsonify({"error": "name and session are required"}), 400
@@ -2012,18 +2017,25 @@ def add_external_member(team_name):
         if any(a.get("session") == session for a in agents):
             return jsonify({"error": "Session already exists"}), 409
         
-        # Add new agent
-        agents.append({
+        # Add new agent with all metadata
+        new_agent = {
             "name": name,
             "tag": tag,
-            "session": session
-        })
+            "session": session,
+            "meta": {
+                "api_url": api_url,
+                "api_key": api_key,
+                "model": model,
+                "headers": headers
+            }
+        }
+        agents.append(new_agent)
         
         # Save back
         with open(openclaw_path, "w", encoding="utf-8") as f:
             json.dump(agents, f, ensure_ascii=False, indent=2)
         
-        return jsonify({"status": "success", "agent": {"name": name, "tag": tag, "session": session}})
+        return jsonify({"status": "success", "agent": new_agent})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
