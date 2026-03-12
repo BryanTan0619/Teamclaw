@@ -1383,7 +1383,7 @@ async function loadConfigTab(agentName, contentEl, overlay) {
     try {
         const [detailRes, skillsRes, toolsRes] = await Promise.all([
             fetch('/proxy_openclaw_agent_detail?name=' + encodeURIComponent(agentName)).then(r => r.json()),
-            fetch('/proxy_openclaw_skills').then(r => r.json()),
+            fetch('/proxy_openclaw_skills?agent=' + encodeURIComponent(agentName)).then(r => r.json()),
             fetch('/proxy_openclaw_tool_groups').then(r => r.json()),
         ]);
 

@@ -1162,9 +1162,11 @@ def _build_agent_detail(agent_cfg: dict, defaults: dict) -> dict:
     also_allow = tools_cfg.get("alsoAllow", tools_cfg.get("allow", []))
     deny = tools_cfg.get("deny", [])
 
-    # Skills: if not set, means "all available"
+    # Skills: if not set (None) or set to "null" string, means "all available"
     skills_cfg = agent_cfg.get("skills", None)
-    skills_all = skills_cfg is None  # True = unrestricted
+    if skills_cfg == "null" or skills_cfg == "":
+        skills_cfg = None
+    skills_all = not isinstance(skills_cfg, list)  # True = unrestricted
 
     return {
         "id": agent_id,
@@ -1489,12 +1491,19 @@ async def update_openclaw_agent_config(req: Request):
     if "skills" in body:
         skills_val = body["skills"]
         if skills_val is None:
-            # Remove skills field = unrestricted
+            # Remove skills field entirely = unrestricted (skills_all)
+            # Use "config unset" to delete the key; fall back to setting empty string
             try:
-                subprocess.run(
-                    [_OPENCLAW_BIN, "config", "set", f"agents.list[{agent_idx}].skills", "null"],
+                r = subprocess.run(
+                    [_OPENCLAW_BIN, "config", "unset", f"agents.list[{agent_idx}].skills"],
                     capture_output=True, text=True, timeout=10,
                 )
+                if r.returncode != 0:
+                    # Fallback: some openclaw versions may not have "unset" — set to JSON null
+                    subprocess.run(
+                        [_OPENCLAW_BIN, "config", "set", f"agents.list[{agent_idx}].skills", "--json", "null"],
+                        capture_output=True, text=True, timeout=10,
+                    )
             except Exception as e:
                 errors.append(f"skills: {e}")
         else:
