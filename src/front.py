@@ -2498,7 +2498,7 @@ def upload_team_snapshot():
             file.save(temp_file.name)
             temp_path = temp_file.name
         
-        # Extract zip file
+            # Extract zip file
         with zipfile.ZipFile(temp_path, 'r') as zip_ref:
             # Validate zip contents (only allow safe file types)
             for file_info in zip_ref.infolist():
@@ -2509,8 +2509,9 @@ def upload_team_snapshot():
                 # Only allow json and yaml files
                 if not (filename.endswith(('.json', '.yaml', '.yml'))):
                     return jsonify({"error": f"Invalid file type in zip: {filename}"}), 400
-                # Extract file to team_dir (use basename to flatten structure)
-                target_path = os.path.join(team_dir, os.path.basename(filename))
+                # Preserve relative directory structure from zip
+                target_path = os.path.join(team_dir, filename)
+                os.makedirs(os.path.dirname(target_path), exist_ok=True)
                 with zip_ref.open(file_info) as source, open(target_path, 'wb') as target:
                     target.write(source.read())
         
