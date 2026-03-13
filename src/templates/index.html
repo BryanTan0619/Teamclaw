@@ -98,13 +98,13 @@
         <div class="chat-main h-screen flex flex-col bg-white border-x border-gray-200 shadow-2xl">
             <!-- Page Switch Tab Bar -->
             <div class="page-tab-bar">
-                <div class="page-tab active" id="tab-chat" onclick="switchPage('chat')" data-i18n="tab_chat">💬 Chat</div>
-                <div class="page-tab" id="tab-group" onclick="switchPage('group')" data-i18n="tab_group">👥 Team</div>
+                <div class="page-tab" id="tab-chat" onclick="switchPage('chat')" data-i18n="tab_chat">💬 Chat</div>
+                <div class="page-tab active" id="tab-group" onclick="switchPage('group')" data-i18n="tab_group">👥 Team</div>
                 <div class="page-tab" id="tab-orchestrate" onclick="switchPage('orchestrate')" data-i18n="tab_orchestrate">🤝 Workflow</div>
             </div>
 
             <!-- === Chat Page === -->
-            <div id="page-chat" class="chat-page">
+            <div id="page-chat" class="chat-page hidden-page" style="display:none;">
             <header class="p-3 sm:p-4 border-b bg-white flex justify-between items-start sm:items-center gap-2 flex-shrink-0">
                 <div class="flex items-center space-x-2 sm:space-x-3 mobile-header-top flex-shrink-0">
                     <div class="bg-blue-600 p-1.5 sm:p-2 rounded-lg text-white font-bold text-lg sm:text-xl">X</div>
@@ -225,7 +225,7 @@
         <!-- end of chat-page -->
 
         <!-- === Group Chat Page === -->
-        <div id="page-group" class="group-page">
+        <div id="page-group" class="group-page active">
             <div style="display:flex; flex:1; overflow:hidden;">
                 <!-- Group list sidebar -->
                 <div class="group-list-sidebar">

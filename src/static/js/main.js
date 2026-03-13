@@ -2082,6 +2082,8 @@ async function handleLogin() {
         loadTools();
         refreshOasisTopics(); // Load OASIS topics after login
         startHistoryPolling();
+        // Default to team page after login
+        switchPage('group');
     } catch (e) {
         if (e.name === 'AbortError') {
             errorDiv.textContent = '连接超时，请确认后端服务已启动后重试';
@@ -2510,6 +2512,8 @@ async function loadTools() {
                     refreshOasisTopics();
                     startHistoryPolling();
                     _syncPublicToggle();
+                    // Default to team page after auto-login
+                    switchPage('group');
                     return;
                 }
             }
@@ -3875,7 +3879,7 @@ function applyAgentColor(el, sender) {
     el.querySelectorAll('.group-msg-content code').forEach(code => { code.style.color = c.code; });
 }
 
-let currentPage = 'chat'; // 'chat' or 'group'
+let currentPage = 'group'; // 'chat' or 'group' or 'orchestrate'
 let currentGroupId = null;
 let groupPollingTimer = null;
 let groupLastMsgId = 0;
@@ -4099,6 +4103,7 @@ async function openGroup(teamName) {
         '</span>' +
         '<span id="team-tab-actions-workflows" style="display:none;">' +
         '<button onclick="loadTeamWorkflows()" class="text-gray-400 hover:text-gray-600 hover:bg-gray-100 px-2 py-1 rounded transition-colors" title="刷新工作流列表">🔄</button>' +
+        '<button onclick="newTeamWorkflowOnCanvas()" class="text-gray-400 hover:text-gray-600 hover:bg-gray-100 px-2 py-1 rounded transition-colors" title="新建工作流（跳转画布）">➕</button>' +
         '</span>' +
         '<button onclick="toggleTeamMembersView()" class="text-gray-400 hover:text-gray-600 text-sm">&times;</button>' +
         '</div>' +
@@ -5532,6 +5537,29 @@ async function deleteTeamWorkflow(name) {
     } catch (err) {
         alert('删除失败: ' + err.message);
     }
+}
+
+// ── New Team Workflow on Canvas ──
+function newTeamWorkflowOnCanvas() {
+    if (!currentGroupId) { alert('请先选择一个团队'); return; }
+    // Switch to orchestrate page
+    switchPage('orchestrate');
+    // Ensure orchestration is initialized
+    if (!window._orchInitialized) { orchInit(); window._orchInitialized = true; }
+    // Load team list and set team context
+    orchLoadTeamList().then(() => {
+        orch.teamName = currentGroupId;
+        orch.teamEnabled = true;
+        orchShowTeamButtons(true);
+        const sel = document.getElementById('orch-team-select');
+        if (sel) sel.value = currentGroupId;
+        // Refresh sidebar agents/experts for the team
+        orchLoadExperts();
+        orchLoadSessionAgents();
+        orchLoadOpenClawSessions();
+        // Clear canvas for a fresh new workflow
+        orchClearCanvas();
+    });
 }
 
 // ── Show Add/Edit Team Expert Modal ──
