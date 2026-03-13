@@ -16,6 +16,9 @@ app.secret_key = os.urandom(24)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB for image uploads
 
 # --- 配置区 ---
+from datetime import timedelta
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)
+
 PORT_AGENT = int(os.getenv("PORT_AGENT", "51200"))
 # [已弃用] 旧端点 URL，已被 /v1/chat/completions 替代
 # LOCAL_AGENT_URL = f"http://127.0.0.1:{PORT_AGENT}/ask"
@@ -35,6 +38,57 @@ INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "")
 # OASIS Forum proxy
 PORT_OASIS = int(os.getenv("PORT_OASIS", "51202"))
 OASIS_BASE_URL = f"http://127.0.0.1:{PORT_OASIS}"
+
+
+# --- Unified auth: before_request hook ---
+# Routes that do NOT require login
+_PUBLIC_ROUTES = frozenset({
+    'index', 'manifest', 'service_worker', 'static',
+    'proxy_openai_completions', 'proxy_openai_models',
+    'proxy_login', 'proxy_logout', 'proxy_check_session',
+})
+
+
+def _is_loopback_request():
+    """Check if the request originates from 127.0.0.1 / ::1 (localhost)."""
+    remote = request.remote_addr or ''
+    return remote in ('127.0.0.1', '::1')
+
+
+@app.before_request
+def _unified_auth_check():
+    """Unified authentication gate for all routes.
+
+    Rules:
+    1. Public routes (login, static, OpenAI compat) → skip.
+    2. Requests from 127.0.0.1 → trusted, skip auth.
+    3. All other routes → require session['user_id'].
+    """
+    # 1. Public routes
+    if request.endpoint in _PUBLIC_ROUTES:
+        return None
+    # 2. Loopback trust
+    if _is_loopback_request():
+        return None
+    # 3. Must be logged in
+    if not session.get('user_id'):
+        return jsonify({'error': '未登录'}), 401
+    return None
+
+
+def _internal_auth_headers():
+    """Build headers for Flask → backend internal communication.
+    Uses INTERNAL_TOKEN instead of forwarding user password.
+    """
+    return {"X-Internal-Token": INTERNAL_TOKEN}
+
+
+def _internal_auth_params(extra: dict | None = None):
+    """Build common params (user_id) + merge extra params."""
+    params = {"user_id": session.get("user_id", "")}
+    if extra:
+        params.update(extra)
+    return params
 
 
 @app.route("/")
@@ -207,9 +261,10 @@ def proxy_login():
     try:
         r = requests.post(LOCAL_LOGIN_URL, json={"user_id": user_id, "password": password}, timeout=10)
         if r.status_code == 200:
-            # 登录成功，在 Flask session 中记录
+            # Login succeeded — only store user_id, NOT password.
+            # Subsequent requests use INTERNAL_TOKEN for backend auth.
             session["user_id"] = user_id
-            session["password"] = password  # 需要传给后端每次验证
+            session.permanent = True
             return jsonify(r.json())
         else:
             return jsonify(r.json()), r.status_code
@@ -231,13 +286,10 @@ def proxy_login():
 @app.route("/proxy_cancel", methods=["POST"])
 def proxy_cancel():
     """代理取消请求到后端 Agent"""
-    user_id = session.get("user_id")
-    password = session.get("password")
-    if not user_id or not password:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     session_id = request.json.get("session_id", "default") if request.is_json else "default"
     try:
-        r = requests.post(LOCAL_AGENT_CANCEL_URL, json={"user_id": user_id, "password": password, "session_id": session_id}, timeout=5)
+        r = requests.post(LOCAL_AGENT_CANCEL_URL, json={"user_id": user_id, "session_id": session_id}, headers=_internal_auth_headers(), timeout=5)
         return jsonify(r.json())
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -245,10 +297,7 @@ def proxy_cancel():
 @app.route("/proxy_tts", methods=["POST"])
 def proxy_tts():
     """代理 TTS 请求到后端 Agent，返回 mp3 音频流"""
-    user_id = session.get("user_id")
-    password = session.get("password")
-    if not user_id or not password:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
 
     text = request.json.get("text", "")
     voice = request.json.get("voice")
@@ -256,10 +305,10 @@ def proxy_tts():
         return jsonify({"error": "文本不能为空"}), 400
 
     try:
-        payload = {"user_id": user_id, "password": password, "text": text}
+        payload = {"user_id": user_id, "text": text}
         if voice:
             payload["voice"] = voice
-        r = requests.post(LOCAL_TTS_URL, json=payload, timeout=60)
+        r = requests.post(LOCAL_TTS_URL, json=payload, headers=_internal_auth_headers(), timeout=60)
         if r.status_code != 200:
             return jsonify({"error": f"TTS 服务错误: {r.status_code}"}), r.status_code
 
@@ -292,12 +341,9 @@ LOCAL_SETTINGS_URL = f"http://127.0.0.1:{PORT_AGENT}/settings"
 @app.route("/proxy_settings", methods=["GET"])
 def proxy_get_settings():
     """代理获取系统配置"""
-    user_id = session.get("user_id")
-    password = session.get("password")
-    if not user_id or not password:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     try:
-        r = requests.get(LOCAL_SETTINGS_URL, params={"user_id": user_id, "password": password}, timeout=10)
+        r = requests.get(LOCAL_SETTINGS_URL, params={"user_id": user_id}, headers=_internal_auth_headers(), timeout=10)
         return jsonify(r.json()), r.status_code
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -306,15 +352,11 @@ def proxy_get_settings():
 @app.route("/proxy_settings", methods=["POST"])
 def proxy_update_settings():
     """代理更新系统配置"""
-    user_id = session.get("user_id")
-    password = session.get("password")
-    if not user_id or not password:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     try:
         data = request.get_json(force=True)
         data["user_id"] = user_id
-        data["password"] = password
-        r = requests.post(LOCAL_SETTINGS_URL, json=data, timeout=10)
+        r = requests.post(LOCAL_SETTINGS_URL, json=data, headers=_internal_auth_headers(), timeout=10)
         return jsonify(r.json()), r.status_code
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -327,12 +369,9 @@ LOCAL_RESTART_URL = f"http://127.0.0.1:{PORT_AGENT}/restart"
 @app.route("/proxy_settings_full", methods=["GET"])
 def proxy_get_settings_full():
     """代理获取全量系统配置（不受白名单限制）"""
-    user_id = session.get("user_id")
-    password = session.get("password")
-    if not user_id or not password:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     try:
-        r = requests.get(LOCAL_SETTINGS_FULL_URL, params={"user_id": user_id, "password": password}, timeout=10)
+        r = requests.get(LOCAL_SETTINGS_FULL_URL, params={"user_id": user_id}, headers=_internal_auth_headers(), timeout=10)
         return jsonify(r.json()), r.status_code
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -341,15 +380,11 @@ def proxy_get_settings_full():
 @app.route("/proxy_settings_full", methods=["POST"])
 def proxy_update_settings_full():
     """代理更新全量系统配置（不受白名单限制）"""
-    user_id = session.get("user_id")
-    password = session.get("password")
-    if not user_id or not password:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     try:
         data = request.get_json(force=True)
         data["user_id"] = user_id
-        data["password"] = password
-        r = requests.post(LOCAL_SETTINGS_FULL_URL, json=data, timeout=10)
+        r = requests.post(LOCAL_SETTINGS_FULL_URL, json=data, headers=_internal_auth_headers(), timeout=10)
         return jsonify(r.json()), r.status_code
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -358,10 +393,7 @@ def proxy_update_settings_full():
 @app.route("/proxy_restart", methods=["POST"])
 def proxy_restart_services():
     """直接写重启信号文件，不经过 mainagent（避免响应返回前进程被杀）"""
-    user_id = session.get("user_id")
-    password = session.get("password")
-    if not user_id or not password:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     try:
         restart_flag = os.path.join(root_dir, ".restart_flag")
         with open(restart_flag, "w") as f:
@@ -374,12 +406,9 @@ def proxy_restart_services():
 @app.route("/proxy_sessions")
 def proxy_sessions():
     """代理获取用户会话列表"""
-    user_id = session.get("user_id")
-    password = session.get("password")
-    if not user_id or not password:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     try:
-        r = requests.post(LOCAL_SESSIONS_URL, json={"user_id": user_id, "password": password}, timeout=15)
+        r = requests.post(LOCAL_SESSIONS_URL, json={"user_id": user_id}, headers=_internal_auth_headers(), timeout=15)
         return jsonify(r.json()), r.status_code
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -388,14 +417,12 @@ def proxy_sessions():
 @app.route("/proxy_sessions_status")
 def proxy_sessions_status():
     """代理获取用户所有 session 的忙碌状态"""
-    user_id = session.get("user_id")
-    password = session.get("password")
-    if not user_id or not password:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     try:
         r = requests.post(
             f"http://127.0.0.1:{PORT_AGENT}/sessions_status",
-            json={"user_id": user_id, "password": password},
+            json={"user_id": user_id},
+            headers=_internal_auth_headers(),
             timeout=5,
         )
         return jsonify(r.json()), r.status_code
@@ -403,9 +430,13 @@ def proxy_sessions_status():
         return jsonify({"error": str(e)}), 500
 
 
+
+
+
 @app.route("/proxy_openclaw_sessions")
 def proxy_openclaw_sessions():
     """Proxy to fetch OpenClaw session list from OASIS server."""
+
     filter_kw = request.args.get("filter", "")
     try:
         r = requests.get(
@@ -421,6 +452,7 @@ def proxy_openclaw_sessions():
 @app.route("/proxy_openclaw_add", methods=["POST"])
 def proxy_openclaw_add():
     """Proxy to create a new OpenClaw agent via OASIS server."""
+
     try:
         r = requests.post(
             f"{OASIS_BASE_URL}/sessions/openclaw/add",
@@ -435,6 +467,7 @@ def proxy_openclaw_add():
 @app.route("/proxy_openclaw_default_workspace", methods=["GET"])
 def proxy_openclaw_default_workspace():
     """Proxy to get the default OpenClaw workspace parent directory."""
+
     try:
         r = requests.get(f"{OASIS_BASE_URL}/sessions/openclaw/default-workspace", timeout=10)
         return jsonify(r.json()), r.status_code
@@ -445,6 +478,7 @@ def proxy_openclaw_default_workspace():
 @app.route("/proxy_openclaw_workspace_files", methods=["GET"])
 def proxy_openclaw_workspace_files():
     """Proxy to list core files in an OpenClaw agent's workspace."""
+
     try:
         r = requests.get(
             f"{OASIS_BASE_URL}/sessions/openclaw/workspace-files",
@@ -459,6 +493,7 @@ def proxy_openclaw_workspace_files():
 @app.route("/proxy_openclaw_workspace_file", methods=["GET"])
 def proxy_openclaw_workspace_file_read():
     """Proxy to read a single workspace file."""
+
     try:
         r = requests.get(
             f"{OASIS_BASE_URL}/sessions/openclaw/workspace-file",
@@ -474,6 +509,7 @@ def proxy_openclaw_workspace_file_read():
 @app.route("/proxy_openclaw_workspace_file", methods=["POST"])
 def proxy_openclaw_workspace_file_save():
     """Proxy to save a workspace file."""
+
     try:
         r = requests.post(
             f"{OASIS_BASE_URL}/sessions/openclaw/workspace-file",
@@ -488,6 +524,7 @@ def proxy_openclaw_workspace_file_save():
 @app.route("/proxy_openclaw_agent_detail", methods=["GET"])
 def proxy_openclaw_agent_detail():
     """Proxy to get detailed agent config (skills, tools, profile)."""
+
     try:
         r = requests.get(
             f"{OASIS_BASE_URL}/sessions/openclaw/agent-detail",
@@ -501,6 +538,7 @@ def proxy_openclaw_agent_detail():
 @app.route("/proxy_openclaw_skills", methods=["GET"])
 def proxy_openclaw_skills():
     """Proxy to OASIS /sessions/openclaw/skills, passing optional agent name for filtering."""
+
     try:
         agent_name = request.args.get("agent", "")
         params = {}
@@ -519,6 +557,7 @@ def proxy_openclaw_skills():
 @app.route("/proxy_openclaw_tool_groups", methods=["GET"])
 def proxy_openclaw_tool_groups():
     """Proxy to get available tool groups and profiles."""
+
     try:
         r = requests.get(f"{OASIS_BASE_URL}/sessions/openclaw/tool-groups", timeout=10)
         return jsonify(r.json()), r.status_code
@@ -529,6 +568,7 @@ def proxy_openclaw_tool_groups():
 @app.route("/proxy_openclaw_update_config", methods=["POST"])
 def proxy_openclaw_update_config():
     """Proxy to update an agent's skills/tools config."""
+
     try:
         r = requests.post(
             f"{OASIS_BASE_URL}/sessions/openclaw/update-config",
@@ -543,6 +583,7 @@ def proxy_openclaw_update_config():
 @app.route("/proxy_openclaw_channels", methods=["GET"])
 def proxy_openclaw_channels():
     """Proxy to list all available channels."""
+
     try:
         r = requests.get(f"{OASIS_BASE_URL}/sessions/openclaw/channels", timeout=15)
         return jsonify(r.json()), r.status_code
@@ -553,6 +594,7 @@ def proxy_openclaw_channels():
 @app.route("/proxy_openclaw_agent_bindings", methods=["GET"])
 def proxy_openclaw_agent_bindings():
     """Proxy to get an agent's current channel bindings."""
+
     try:
         r = requests.get(
             f"{OASIS_BASE_URL}/sessions/openclaw/agent-bindings",
@@ -567,6 +609,7 @@ def proxy_openclaw_agent_bindings():
 @app.route("/proxy_openclaw_agent_bind", methods=["POST"])
 def proxy_openclaw_agent_bind():
     """Proxy to bind/unbind a channel to an agent."""
+
     try:
         r = requests.post(
             f"{OASIS_BASE_URL}/sessions/openclaw/agent-bind",
@@ -581,6 +624,7 @@ def proxy_openclaw_agent_bind():
 @app.route("/proxy_openclaw_remove", methods=["DELETE"])
 def proxy_openclaw_remove():
     """Proxy to delete an OpenClaw agent via OASIS server."""
+
     try:
         body = request.get_json(force=True)
         agent_name = body.get("name", "")
@@ -633,9 +677,7 @@ def team_openclaw_snapshot_get():
     Query: ?team=<name>
     Returns: { ok, agents: [ { name, tag, global_name, config?, workspace_files?, meta? }, ... ] }
     """
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     team = request.args.get("team", "")
     if not team:
         return jsonify({"ok": False, "error": "team is required"}), 400
@@ -649,9 +691,7 @@ def team_openclaw_snapshot_export():
     Body: { "team": "...", "agent_name": "real_agent_name (global_name)", "short_name": "display_name" }
     Fetches agent snapshot from oasis server and upserts into external_agents.json.
     """
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
 
     body = request.get_json(force=True)
     team = body.get("team", "")
@@ -709,9 +749,7 @@ def team_openclaw_snapshot_sync_all():
     Body: { "team": "team_name" }
     Returns: { ok, synced: int, agents: [...] }
     """
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
 
     body = request.get_json(force=True)
     team = body.get("team", "")
@@ -784,9 +822,7 @@ def team_openclaw_snapshot_restore():
     to avoid agent name collisions on a new device.
     On success, updates the global_name field in external_agents.json.
     """
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
 
     body = request.get_json(force=True)
     team = body.get("team", "")
@@ -838,9 +874,7 @@ def team_openclaw_snapshot_export_all():
     Uses external_agents.json as the source of truth for which agents belong
     to this team, fetches each one's latest snapshot, and updates in-place.
     """
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
 
     body = request.get_json(force=True)
     team = body.get("team", "")
@@ -909,9 +943,7 @@ def team_openclaw_snapshot_restore_all():
     team + "_" + agent_name to avoid collisions, then restores it.
     On success, updates global_name fields in external_agents.json.
     """
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
 
     body = request.get_json(force=True)
     team = body.get("team", "")
@@ -965,15 +997,12 @@ def team_openclaw_snapshot_restore_all():
 @app.route("/proxy_session_history", methods=["POST"])
 def proxy_session_history():
     """代理获取指定会话的历史消息"""
-    user_id = session.get("user_id")
-    password = session.get("password")
-    if not user_id or not password:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     sid = request.json.get("session_id", "")
     try:
         r = requests.post(LOCAL_SESSION_HISTORY_URL, json={
-            "user_id": user_id, "password": password, "session_id": sid
-        }, timeout=15)
+            "user_id": user_id, "session_id": sid
+        }, headers=_internal_auth_headers(), timeout=15)
         return jsonify(r.json()), r.status_code
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -982,15 +1011,12 @@ def proxy_session_history():
 @app.route("/proxy_session_status", methods=["POST"])
 def proxy_session_status():
     """代理检查会话是否有系统触发的新消息"""
-    user_id = session.get("user_id")
-    password = session.get("password")
-    if not user_id or not password:
-        return jsonify({"has_new_messages": False}), 200
+    user_id = session.get("user_id", "")
     sid = request.json.get("session_id", "") if request.is_json else ""
     try:
         r = requests.post(LOCAL_SESSION_STATUS_URL, json={
-            "user_id": user_id, "password": password, "session_id": sid
-        }, timeout=5)
+            "user_id": user_id, "session_id": sid
+        }, headers=_internal_auth_headers(), timeout=5)
         return jsonify(r.json()), r.status_code
     except Exception:
         return jsonify({"has_new_messages": False}), 200
@@ -999,15 +1025,12 @@ def proxy_session_status():
 @app.route("/proxy_delete_session", methods=["POST"])
 def proxy_delete_session():
     """代理删除会话请求到后端 Agent"""
-    user_id = session.get("user_id")
-    password = session.get("password")
-    if not user_id or not password:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     sid = request.json.get("session_id", "") if request.is_json else ""
     try:
         r = requests.post(LOCAL_DELETE_SESSION_URL, json={
-            "user_id": user_id, "password": password, "session_id": sid
-        }, timeout=15)
+            "user_id": user_id, "session_id": sid
+        }, headers=_internal_auth_headers(), timeout=15)
         return jsonify(r.json()), r.status_code
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1016,20 +1039,17 @@ def proxy_delete_session():
 # ===== Group Chat Proxy Routes =====
 
 def _group_auth_headers():
-    """构造群聊API的Authorization header"""
-    user_id = session.get("user_id")
-    password = session.get("password")
-    if not user_id or not password:
-        return None, None
-    return user_id, {"Authorization": f"Bearer {user_id}:{password}"}
+    """构造群聊API的Authorization header（使用 INTERNAL_TOKEN）"""
+    user_id = session.get("user_id", "")
+    return user_id, {
+        "Authorization": f"Bearer {INTERNAL_TOKEN}:{user_id}",
+    }
 
 
 @app.route("/proxy_groups", methods=["GET"])
 def proxy_list_groups():
     """代理列出用户群聊"""
     uid, headers = _group_auth_headers()
-    if not uid:
-        return jsonify([]), 200
     try:
         r = requests.get(f"http://127.0.0.1:{PORT_AGENT}/groups", headers=headers, timeout=10)
         return jsonify(r.json()), r.status_code
@@ -1041,8 +1061,6 @@ def proxy_list_groups():
 def proxy_create_group():
     """代理创建群聊"""
     uid, headers = _group_auth_headers()
-    if not uid:
-        return jsonify({"error": "未登录"}), 401
     try:
         headers["Content-Type"] = "application/json"
         r = requests.post(f"http://127.0.0.1:{PORT_AGENT}/groups", json=request.get_json(silent=True), headers=headers, timeout=10)
@@ -1055,8 +1073,6 @@ def proxy_create_group():
 def proxy_get_group(group_id):
     """代理获取群聊详情"""
     uid, headers = _group_auth_headers()
-    if not uid:
-        return jsonify({"error": "未登录"}), 401
     try:
         r = requests.get(f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}", headers=headers, timeout=10)
         return jsonify(r.json()), r.status_code
@@ -1068,8 +1084,6 @@ def proxy_get_group(group_id):
 def proxy_update_group(group_id):
     """代理更新群聊"""
     uid, headers = _group_auth_headers()
-    if not uid:
-        return jsonify({"error": "未登录"}), 401
     try:
         headers["Content-Type"] = "application/json"
         r = requests.put(f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}", json=request.get_json(silent=True), headers=headers, timeout=10)
@@ -1082,8 +1096,6 @@ def proxy_update_group(group_id):
 def proxy_delete_group(group_id):
     """代理删除群聊"""
     uid, headers = _group_auth_headers()
-    if not uid:
-        return jsonify({"error": "未登录"}), 401
     try:
         r = requests.delete(f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}", headers=headers, timeout=10)
         return jsonify(r.json()), r.status_code
@@ -1095,8 +1107,6 @@ def proxy_delete_group(group_id):
 def proxy_group_messages(group_id):
     """代理获取群聊消息（支持增量 after_id）"""
     uid, headers = _group_auth_headers()
-    if not uid:
-        return jsonify({"messages": []}), 200
     try:
         after_id = request.args.get("after_id", "0")
         r = requests.get(
@@ -1113,8 +1123,6 @@ def proxy_group_messages(group_id):
 def proxy_post_group_message(group_id):
     """代理发送群聊消息"""
     uid, headers = _group_auth_headers()
-    if not uid:
-        return jsonify({"error": "未登录"}), 401
     try:
         headers["Content-Type"] = "application/json"
         r = requests.post(
@@ -1131,8 +1139,6 @@ def proxy_post_group_message(group_id):
 def proxy_mute_group(group_id):
     """代理静音群聊"""
     uid, headers = _group_auth_headers()
-    if not uid:
-        return jsonify({"error": "未登录"}), 401
     try:
         r = requests.post(
             f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}/mute",
@@ -1147,8 +1153,6 @@ def proxy_mute_group(group_id):
 def proxy_unmute_group(group_id):
     """代理取消静音群聊"""
     uid, headers = _group_auth_headers()
-    if not uid:
-        return jsonify({"error": "未登录"}), 401
     try:
         r = requests.post(
             f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}/unmute",
@@ -1163,8 +1167,6 @@ def proxy_unmute_group(group_id):
 def proxy_group_mute_status(group_id):
     """代理查询群聊静音状态"""
     uid, headers = _group_auth_headers()
-    if not uid:
-        return jsonify({"muted": False}), 200
     try:
         r = requests.get(
             f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}/mute_status",
@@ -1179,8 +1181,6 @@ def proxy_group_mute_status(group_id):
 def proxy_group_sessions(group_id):
     """代理获取可加入群聊的sessions"""
     uid, headers = _group_auth_headers()
-    if not uid:
-        return jsonify({"sessions": []}), 200
     try:
         r = requests.get(
             f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}/sessions",
@@ -1196,9 +1196,7 @@ def proxy_group_sessions(group_id):
 @app.route("/proxy_oasis/topics")
 def proxy_oasis_topics():
     """Proxy: list OASIS discussion topics for the logged-in user."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify([]), 200
+    user_id = session.get("user_id", ""), 200
     try:
         print(f"[OASIS Proxy] Fetching topics from {OASIS_BASE_URL}/topics for user={user_id}")
         r = requests.get(f"{OASIS_BASE_URL}/topics", params={"user_id": user_id}, timeout=10)
@@ -1212,9 +1210,7 @@ def proxy_oasis_topics():
 @app.route("/proxy_oasis/topics/<topic_id>")
 def proxy_oasis_topic_detail(topic_id):
     """Proxy: get full detail of a specific OASIS discussion."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     try:
         url = f"{OASIS_BASE_URL}/topics/{topic_id}"
         print(f"[OASIS Proxy] Fetching topic detail from {url} for user={user_id}")
@@ -1229,9 +1225,7 @@ def proxy_oasis_topic_detail(topic_id):
 @app.route("/proxy_oasis/topics/<topic_id>/stream")
 def proxy_oasis_topic_stream(topic_id):
     """Proxy: SSE stream for real-time OASIS discussion updates."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     try:
         r = requests.get(
             f"{OASIS_BASE_URL}/topics/{topic_id}/stream",
@@ -1273,9 +1267,7 @@ def proxy_oasis_experts():
 @app.route("/proxy_oasis/topics/<topic_id>/cancel", methods=["POST"])
 def proxy_oasis_cancel_topic(topic_id):
     """Proxy: force-cancel a running OASIS discussion."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     try:
         r = requests.delete(f"{OASIS_BASE_URL}/topics/{topic_id}", params={"user_id": user_id}, timeout=10)
         return jsonify(r.json()), r.status_code
@@ -1286,9 +1278,7 @@ def proxy_oasis_cancel_topic(topic_id):
 @app.route("/proxy_oasis/topics/<topic_id>/purge", methods=["POST"])
 def proxy_oasis_purge_topic(topic_id):
     """Proxy: permanently delete an OASIS discussion record."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     try:
         r = requests.post(f"{OASIS_BASE_URL}/topics/{topic_id}/purge", params={"user_id": user_id}, timeout=10)
         return jsonify(r.json()), r.status_code
@@ -1299,9 +1289,7 @@ def proxy_oasis_purge_topic(topic_id):
 @app.route("/proxy_oasis/topics", methods=["DELETE"])
 def proxy_oasis_purge_all_topics():
     """Proxy: delete all OASIS topics for the current user."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     try:
         r = requests.delete(f"{OASIS_BASE_URL}/topics", params={"user_id": user_id}, timeout=30)
         return jsonify(r.json()), r.status_code
@@ -1397,9 +1385,7 @@ def proxy_visual_experts():
 @app.route("/proxy_visual/experts/custom", methods=["POST"])
 def proxy_visual_add_custom_expert():
     """Add a custom expert via OASIS server (team-scoped when team param provided)."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data"}), 400
@@ -1418,9 +1404,7 @@ def proxy_visual_add_custom_expert():
 @app.route("/proxy_visual/experts/custom/<tag>", methods=["DELETE"])
 def proxy_visual_delete_custom_expert(tag):
     """Delete a custom expert via OASIS server (team-scoped when team param provided)."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     team = request.args.get("team", "")
     try:
         params = {"user_id": user_id}
@@ -1456,18 +1440,15 @@ def proxy_visual_agent_generate_yaml():
     if not data:
         return jsonify({"error": "No data"}), 400
 
-    user_id = session.get("user_id")
-    password = session.get("password")
-    if not user_id or not password:
-        return jsonify({"error": "Not logged in"}), 401
+    user_id = session.get("user_id", "")
 
     try:
         prompt = _vis_build_llm_prompt(data) if _vis_build_llm_prompt else "Error: visual module unavailable"
 
-        # Call main agent with user credentials
+        # Call main agent with INTERNAL_TOKEN credentials
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {user_id}:{password}",
+            "Authorization": f"Bearer {INTERNAL_TOKEN}:{user_id}",
         }
         payload = {
             "model": "teambot",
@@ -1530,9 +1511,7 @@ def proxy_visual_agent_generate_yaml():
 @app.route("/proxy_visual/save-layout", methods=["POST"])
 def proxy_visual_save_layout():
     """Save canvas layout as YAML (no separate layout JSON stored)."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "Not logged in"}), 401
+    user_id = session.get("user_id", "")
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data"}), 400
@@ -1556,9 +1535,7 @@ def proxy_visual_save_layout():
 @app.route("/proxy_visual/load-layouts", methods=["GET"])
 def proxy_visual_load_layouts():
     """List saved YAML workflows as available layouts (team-scoped)."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify([])
+    user_id = session.get("user_id", "")
     team = request.args.get("team", "")
     yd = _yaml_dir(user_id, team)
     if not os.path.isdir(yd):
@@ -1569,9 +1546,7 @@ def proxy_visual_load_layouts():
 @app.route("/proxy_visual/load-layout/<name>", methods=["GET"])
 def proxy_visual_load_layout(name):
     """Load a layout by reading the YAML file and converting to layout on-the-fly."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "Not logged in"}), 401
+    user_id = session.get("user_id", "")
     if not _vis_yaml_to_layout:
         return jsonify({"error": "YAML-to-layout converter unavailable"}), 500
     safe = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
@@ -1596,9 +1571,7 @@ def proxy_visual_load_layout(name):
 @app.route("/proxy_visual/load-yaml-raw/<name>", methods=["GET"])
 def proxy_visual_load_yaml_raw(name):
     """Return raw YAML text for a saved workflow."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "Not logged in"}), 401
+    user_id = session.get("user_id", "")
     safe = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
     team = request.args.get("team", "")
     yd = _yaml_dir(user_id, team)
@@ -1614,9 +1587,7 @@ def proxy_visual_load_yaml_raw(name):
 @app.route("/proxy_visual/delete-layout/<name>", methods=["DELETE"])
 def proxy_visual_delete_layout(name):
     """Delete a saved YAML workflow."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "Not logged in"}), 401
+    user_id = session.get("user_id", "")
     safe = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
     team = request.args.get("team", "")
     yd = _yaml_dir(user_id, team)
@@ -1632,9 +1603,7 @@ def proxy_visual_delete_layout(name):
 @app.route("/proxy_visual/upload-yaml", methods=["POST"])
 def proxy_visual_upload_yaml():
     """Upload a YAML file: save it and convert to layout data for canvas import."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "Not logged in"}), 401
+    user_id = session.get("user_id", "")
     data = request.get_json()
     if not data or not data.get("content"):
         return jsonify({"error": "No content"}), 400
@@ -1672,12 +1641,9 @@ def proxy_visual_upload_yaml():
 @app.route("/proxy_visual/sessions-status", methods=["GET"])
 def proxy_visual_sessions_status():
     """Return all sessions with their running status for the canvas display."""
-    user_id = session.get("user_id")
-    password = session.get("password")
-    if not user_id or not password:
-        return jsonify([])
+    user_id = session.get("user_id", "")
     try:
-        r = requests.post(LOCAL_SESSIONS_URL, json={"user_id": user_id, "password": password}, timeout=10)
+        r = requests.post(LOCAL_SESSIONS_URL, json={"user_id": user_id}, headers=_internal_auth_headers(), timeout=10)
         if r.status_code != 200:
             return jsonify([])
         sessions_data = r.json()
@@ -1729,9 +1695,7 @@ def proxy_tunnel_status():
 @app.route("/proxy_tunnel/start", methods=["POST"])
 def proxy_tunnel_start():
     """Start cloudflare tunnel in background."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
 
     running, pid = _tunnel_running()
     if running:
@@ -1762,9 +1726,7 @@ def proxy_tunnel_start():
 @app.route("/proxy_tunnel/stop", methods=["POST"])
 def proxy_tunnel_stop():
     """Stop the running tunnel."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
 
     running, pid = _tunnel_running()
     if not running:
@@ -1874,9 +1836,7 @@ def _ia_save(user_id: str, data: list, team: str = ""):
 @app.route("/internal_agents", methods=["GET"])
 def ia_list():
     """Return the full internal-agent list for the logged-in user."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     team = request.args.get("team", "")
     return jsonify({"status": "success", "agents": _ia_load(user_id, team)})
 
@@ -1887,9 +1847,7 @@ def ia_add():
     Body: { "session": "<id>", "meta": { ... optional ... } }
     Query: ?team=<name>  (optional, for team-scoped storage)
     """
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     team = request.args.get("team", "")
     body = request.get_json(force=True)
     sid = body.get("session")
@@ -1910,9 +1868,7 @@ def ia_update(sid):
     """Update the meta of an existing internal agent.
     Body: { "meta": { ...fields to merge... } }
     """
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     team = request.args.get("team", "")
     body = request.get_json(force=True)
     agents = _ia_load(user_id, team)
@@ -1930,9 +1886,7 @@ def ia_update(sid):
 @app.route("/internal_agents/<sid>", methods=["DELETE"])
 def ia_delete(sid):
     """Remove an internal agent entry by session id."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     team = request.args.get("team", "")
     
     # Load current data
@@ -1960,9 +1914,7 @@ def ia_delete(sid):
 @app.route("/teams", methods=["GET"])
 def list_teams():
     """List all team names for the current user."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     teams_dir = os.path.join(root_dir, "data", "user_files", user_id, "teams")
     teams = []
     if os.path.isdir(teams_dir):
@@ -1977,9 +1929,7 @@ def list_teams():
 @app.route("/teams", methods=["POST"])
 def create_team():
     """Create a new team folder."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     
     body = request.get_json(force=True)
     team = body.get("team", "")
@@ -2006,9 +1956,7 @@ def create_team():
 @app.route("/teams/<team_name>", methods=["DELETE"])
 def delete_team(team_name):
     """Delete a team and all its internal agents, then remove the folder."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     
     # Validate team name
     if not team_name or "/" in team_name or "\\" in team_name:
@@ -2059,9 +2007,7 @@ def get_team_members(team_name):
     """Get all members (agents) in a team.
     Returns list of agents with name, type (oasis/openclaw/ext), tag, and global_name.
     """
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     
     # Validate team name
     if "/" in team_name or "\\" in team_name or team_name.startswith("."):
@@ -2113,9 +2059,7 @@ def get_team_members(team_name):
 @app.route("/teams/<team_name>/members/external", methods=["POST"])
 def add_external_member(team_name):
     """Add an external agent to the team's external_agents.json."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     
     # Validate team name
     if "/" in team_name or "\\" in team_name or team_name.startswith("."):
@@ -2179,9 +2123,7 @@ def add_external_member(team_name):
 @app.route("/teams/<team_name>/members/external", methods=["DELETE"])
 def delete_external_member(team_name):
     """Delete an external agent from the team's external_agents.json."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     
     # Validate team name
     if "/" in team_name or "\\" in team_name or team_name.startswith("."):
@@ -2238,9 +2180,7 @@ def update_external_member(team_name):
     fields (name, tag, global_name, api_url, api_key, model, headers).
     Only the fields present in the request body are updated.
     """
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
 
     # Validate team name
     if "/" in team_name or "\\" in team_name or team_name.startswith("."):
@@ -2345,9 +2285,7 @@ def _team_experts_save(user_id: str, team_name: str, experts: list) -> None:
 @app.route("/teams/<team_name>/experts", methods=["GET"])
 def get_team_experts(team_name):
     """List all custom experts defined for this team."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     if "/" in team_name or "\\" in team_name or team_name.startswith("."):
         return jsonify({"error": "Invalid team name"}), 400
     team_dir = os.path.join(root_dir, "data", "user_files", user_id, "teams", team_name)
@@ -2360,9 +2298,7 @@ def get_team_experts(team_name):
 @app.route("/teams/<team_name>/experts", methods=["POST"])
 def add_team_expert(team_name):
     """Add a custom expert to this team's expert pool."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     if "/" in team_name or "\\" in team_name or team_name.startswith("."):
         return jsonify({"error": "Invalid team name"}), 400
     team_dir = os.path.join(root_dir, "data", "user_files", user_id, "teams", team_name)
@@ -2398,9 +2334,7 @@ def add_team_expert(team_name):
 @app.route("/teams/<team_name>/experts/<tag>", methods=["PUT"])
 def update_team_expert(team_name, tag):
     """Update an existing team expert by tag."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     if "/" in team_name or "\\" in team_name or team_name.startswith("."):
         return jsonify({"error": "Invalid team name"}), 400
     team_dir = os.path.join(root_dir, "data", "user_files", user_id, "teams", team_name)
@@ -2434,9 +2368,7 @@ def update_team_expert(team_name, tag):
 @app.route("/teams/<team_name>/experts/<tag>", methods=["DELETE"])
 def delete_team_expert(team_name, tag):
     """Delete a team expert by tag."""
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     if "/" in team_name or "\\" in team_name or team_name.startswith("."):
         return jsonify({"error": "Invalid team name"}), 400
     team_dir = os.path.join(root_dir, "data", "user_files", user_id, "teams", team_name)
@@ -2460,9 +2392,7 @@ def download_team_snapshot():
              and skill folders (workspace + managed) for each openclaw agent.
     Note: session fields inside internal_agents.json are excluded (private).
     """
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     
     body = request.get_json(force=True)
     team = body.get("team", "")
@@ -2620,9 +2550,7 @@ def upload_team_snapshot():
     """Upload and restore a team snapshot from a zip file.
     Extracts to the team folder and recreates internal agents.
     """
-    user_id = session.get("user_id")
-    if not user_id:
-        return jsonify({"error": "未登录"}), 401
+    user_id = session.get("user_id", "")
     
     # Get team name from form data
     team = request.form.get("team", "")

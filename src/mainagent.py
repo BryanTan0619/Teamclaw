@@ -71,6 +71,20 @@ def verify_internal_token(token: str | None):
         raise HTTPException(status_code=403, detail="无效的内部通信凭证")
 
 
+def verify_auth_or_token(user_id: str, password: str = "",
+                         x_internal_token: str | None = None):
+    """Verify authentication via password OR X-Internal-Token.
+    Raises HTTPException on failure.
+    """
+    # 1. Internal token takes priority
+    if x_internal_token and x_internal_token == INTERNAL_TOKEN:
+        return
+    # 2. Fall back to password verification
+    if password and verify_password(user_id, password):
+        return
+    raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+
 # --- User auth helpers ---
 def load_users() -> dict:
     """加载用户名-密码哈希配置"""
@@ -138,7 +152,7 @@ class SystemTriggerRequest(BaseModel):
 
 class CancelRequest(BaseModel):
     user_id: str
-    password: str
+    password: str = ""  # Optional when using X-Internal-Token
     session_id: str = "default"
 
 
@@ -413,10 +427,9 @@ async def login(req: LoginRequest):
 
 
 @app.post("/cancel")
-async def cancel_agent(req: CancelRequest):
+async def cancel_agent(req: CancelRequest, x_internal_token: str | None = Header(None)):
     """终止指定用户的智能体思考"""
-    if not verify_password(req.user_id, req.password):
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    verify_auth_or_token(req.user_id, req.password, x_internal_token)
     task_key = f"{req.user_id}#{req.session_id}"
     await agent.cancel_task(task_key)
     return {"status": "success", "message": "已终止"}
@@ -428,15 +441,14 @@ async def cancel_agent(req: CancelRequest):
 
 class TTSRequest(BaseModel):
     user_id: str
-    password: str
+    password: str = ""  # Optional when using X-Internal-Token
     text: str
     voice: Optional[str] = None
 
 @app.post("/tts")
-async def text_to_speech(req: TTSRequest):
+async def text_to_speech(req: TTSRequest, x_internal_token: str | None = Header(None)):
     """将文本转为语音，返回 mp3 音频流"""
-    if not verify_password(req.user_id, req.password):
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    verify_auth_or_token(req.user_id, req.password, x_internal_token)
 
     tts_text = req.text.strip()
     if not tts_text:
@@ -494,24 +506,23 @@ async def text_to_speech(req: TTSRequest):
 
 class SessionListRequest(BaseModel):
     user_id: str
-    password: str
+    password: str = ""  # Optional when using X-Internal-Token
 
 class SessionHistoryRequest(BaseModel):
     user_id: str
-    password: str
+    password: str = ""  # Optional when using X-Internal-Token
     session_id: str
 
 class DeleteSessionRequest(BaseModel):
     user_id: str
-    password: str
+    password: str = ""  # Optional when using X-Internal-Token
     session_id: str = ""  # 为空则删除该用户所有会话
 
 
 @app.post("/sessions")
-async def list_sessions(req: SessionListRequest):
+async def list_sessions(req: SessionListRequest, x_internal_token: str | None = Header(None)):
     """列出用户的所有会话，返回 session_id 列表及每个会话的摘要信息。"""
-    if not verify_password(req.user_id, req.password):
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    verify_auth_or_token(req.user_id, req.password, x_internal_token)
 
     prefix = f"{req.user_id}#"
     sessions = []
@@ -570,10 +581,9 @@ async def list_sessions(req: SessionListRequest):
 
 
 @app.post("/sessions_status")
-async def sessions_status(req: SessionListRequest):
+async def sessions_status(req: SessionListRequest, x_internal_token: str | None = Header(None)):
     """返回用户所有 session 的忙碌状态、来源和待处理系统消息数。"""
-    if not verify_password(req.user_id, req.password):
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    verify_auth_or_token(req.user_id, req.password, x_internal_token)
 
     prefix = f"{req.user_id}#"
     # 从 agent 内存中获取所有已知 thread 的状态
@@ -593,10 +603,9 @@ async def sessions_status(req: SessionListRequest):
 
 
 @app.post("/session_history")
-async def get_session_history(req: SessionHistoryRequest):
+async def get_session_history(req: SessionHistoryRequest, x_internal_token: str | None = Header(None)):
     """获取指定会话的完整对话历史（仅返回 Human/AI 消息）。"""
-    if not verify_password(req.user_id, req.password):
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    verify_auth_or_token(req.user_id, req.password, x_internal_token)
 
     thread_id = f"{req.user_id}#{req.session_id}"
     config = {"configurable": {"thread_id": thread_id}}
@@ -652,10 +661,7 @@ async def delete_session(
 
     认证：用户密码 或 INTERNAL_TOKEN (via X-Internal-Token header)
     """
-    # 支持内部 token 认证（OASIS 专家 session 清理使用）
-    internal_auth = x_internal_token and x_internal_token == INTERNAL_TOKEN
-    if not internal_auth and not verify_password(req.user_id, req.password):
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    verify_auth_or_token(req.user_id, req.password, x_internal_token)
 
     try:
         async with aiosqlite.connect(db_path) as db:
@@ -693,14 +699,13 @@ async def delete_session(
 
 class SessionStatusRequest(BaseModel):
     user_id: str
-    password: str
+    password: str = ""  # Optional when using X-Internal-Token
     session_id: str = "default"
 
 @app.post("/session_status")
-async def session_status(req: SessionStatusRequest):
+async def session_status(req: SessionStatusRequest, x_internal_token: str | None = Header(None)):
     """前端轮询接口：检查是否有系统触发产生的新消息。"""
-    if not verify_password(req.user_id, req.password):
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    verify_auth_or_token(req.user_id, req.password, x_internal_token)
     thread_id = f"{req.user_id}#{req.session_id}"
     has_new = agent.has_pending_system_messages(thread_id)
     busy = agent.is_thread_busy(thread_id)
@@ -813,25 +818,23 @@ def _write_env_settings(updates: dict):
 
 class SettingsUpdateRequest(BaseModel):
     user_id: str
-    password: str
+    password: str = ""  # Optional when using X-Internal-Token
     settings: dict
 
 
 @app.get("/settings")
-async def get_settings(user_id: str, password: str):
+async def get_settings(user_id: str, password: str = "", x_internal_token: str | None = Header(None)):
     """获取系统配置（敏感值掩码）。"""
-    if not verify_password(user_id, password):
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    verify_auth_or_token(user_id, password, x_internal_token)
     raw = _read_env_settings()
     masked = {k: _mask_value(k, v) for k, v in raw.items()}
     return {"status": "success", "settings": masked}
 
 
 @app.post("/settings")
-async def update_settings(req: SettingsUpdateRequest):
+async def update_settings(req: SettingsUpdateRequest, x_internal_token: str | None = Header(None)):
     """更新系统配置。支持热生效的配置项会立即同步到 os.environ。"""
-    if not verify_password(req.user_id, req.password):
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    verify_auth_or_token(req.user_id, req.password, x_internal_token)
 
     # 只允许白名单内的 key
     filtered = {}
@@ -859,10 +862,9 @@ _FULL_MASK_PATTERNS = ("KEY", "TOKEN", "SECRET", "PASSWORD")
 
 
 @app.get("/settings/full")
-async def get_settings_full(user_id: str, password: str):
+async def get_settings_full(user_id: str, password: str = "", x_internal_token: str | None = Header(None)):
     """获取 .env 中所有配置项（敏感值掩码），供前端用户完全掌控。"""
-    if not verify_password(user_id, password):
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    verify_auth_or_token(user_id, password, x_internal_token)
     raw = _read_env_all()
     masked = {}
     for k, v in raw.items():
@@ -874,10 +876,9 @@ async def get_settings_full(user_id: str, password: str):
 
 
 @app.post("/settings/full")
-async def update_settings_full(req: SettingsUpdateRequest):
+async def update_settings_full(req: SettingsUpdateRequest, x_internal_token: str | None = Header(None)):
     """更新 .env 任意配置项（前端用户完全掌控），不受白名单限制。"""
-    if not verify_password(req.user_id, req.password):
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    verify_auth_or_token(req.user_id, req.password, x_internal_token)
 
     updates = {}
     for k, v in req.settings.items():
@@ -897,10 +898,9 @@ async def update_settings_full(req: SettingsUpdateRequest):
 
 
 @app.post("/restart")
-async def restart_services(req: SettingsUpdateRequest):
+async def restart_services(req: SettingsUpdateRequest, x_internal_token: str | None = Header(None)):
     """写入重启信号文件，launcher.py 检测到后会自动重启所有服务。"""
-    if not verify_password(req.user_id, req.password):
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    verify_auth_or_token(req.user_id, req.password, x_internal_token)
     try:
         with open(_RESTART_FLAG, "w") as f:
             f.write("restart")
@@ -1580,15 +1580,24 @@ class GroupMessageRequest(BaseModel):
 
 _group_muted: set[str] = set()  # 被静音的群 group_id 集合，广播时跳过
 
-def _parse_group_auth(authorization: str | None):
-    """从 Bearer token 解析用户认证，返回 (user_id, password, session_id)"""
+def _parse_group_auth(authorization: str | None, x_internal_token: str | None = None):
+    """从 Bearer token 解析用户认证，返回 (user_id, password, session_id)。
+    Supports: Bearer user:pass, Bearer user:pass:session, Bearer INTERNAL_TOKEN:user, Bearer INTERNAL_TOKEN:user:session
+    """
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing Authorization header")
     token = authorization[7:]
-    # 格式: user_id:password 或 user_id:password:session_id
     parts = token.split(":")
     if len(parts) < 2:
         raise HTTPException(status_code=401, detail="Invalid token format")
+
+    # Check if the first part is INTERNAL_TOKEN (admin-level auth)
+    if parts[0] == INTERNAL_TOKEN:
+        uid = parts[1] if len(parts) >= 2 else "system"
+        sid = parts[2] if len(parts) > 2 else "default"
+        return uid, "", sid
+
+    # Otherwise treat as user_id:password[:session_id]
     uid, pw = parts[0], parts[1]
     sid = parts[2] if len(parts) > 2 else "default"
     if not verify_password(uid, pw):
