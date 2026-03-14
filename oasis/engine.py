@@ -292,10 +292,19 @@ class DiscussionEngine:
                 api_url = cfg.get("api_url", "") or ""
                 model_str = cfg.get("model", "gpt-3.5-turbo")
                 config = self._lookup_by_tag(first, user_id, self._team)
-                expert_name = config["name"] if config else first
-                persona = config.get("persona", "") if config else ""
+                if is_openclaw:
+                    # For OpenClaw agents, the display name comes from ext_id
+                    # (the short name in YAML, e.g. "Alice"), NOT from the tag
+                    # "openclaw" which is just the type identifier.
+                    expert_name = ext_id
+                    persona = config.get("persona", "") if config else ""
+                else:
+                    expert_name = config["name"] if config else first
+                    persona = config.get("persona", "") if config else ""
                 # Look up the real OpenClaw agent name from external_agents.json
-                oc_name = _find_external_agent_global_name(external_agents, expert_name)
+                # Use ext_id (the YAML short name) for lookup, not expert_name
+                # which may already be correct but ext_id is the canonical key
+                oc_name = _find_external_agent_global_name(external_agents, ext_id)
                 expert = ExternalExpert(
                     name=expert_name,
                     ext_id=ext_id,
