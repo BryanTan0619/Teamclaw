@@ -102,18 +102,21 @@ bash selfskill/scripts/run.sh auto-model
 # Then set the chosen model:
 # bash selfskill/scripts/run.sh configure LLM_MODEL <chosen-model>
 
-# ⚠️ Create user account (REQUIRED — without this you CANNOT log in to the Web UI or call API)
-# ⚠️ AGENT: You MUST ASK the user for their desired username and password BEFORE running this command!
-#    Do NOT use default/example credentials like "admin/admin123" or "system/MySecurePass123".
-#    Example prompt: "Please provide the username and password you'd like to use for the TeamClaw Web UI."
-bash selfskill/scripts/run.sh add-user <username> <password>
+# User account setup:
+# Option A (recommended for first run): Skip add-user entirely.
+#   The Web UI supports "Local No-Password Login" when accessed via 127.0.0.1.
+#   The agent should ASK the user for a preferred username (default: "admin").
+#   This user will NOT be in users.json and can ONLY log in via 127.0.0.1 no-password login.
+#   Password login will be rejected for this user until add-user is run.
+#
+# Option B: Create a full user account with password:
+#   bash selfskill/scripts/run.sh add-user <username> <password>
+#   ⚠️ AGENT: You MUST ASK the user for their desired username and password BEFORE running this command!
 ```
 
-> ⚠️ **You MUST create at least one user account before starting the service!**
-> - **AGENT MUST ask the user** for their preferred username and password. Do NOT invent credentials.
-> - The Web UI login page requires username + password.
-> - All API calls require `Authorization: Bearer <user_id>:<password>` (or `INTERNAL_TOKEN:<user_id>`).
-> - If you skip this step, you will be locked out of the entire system.
+> **User Account Options:**
+> - **First run (default)**: No `add-user` needed. Ask the user for a username (default `admin`). This user can log in via **127.0.0.1 Local No-Password Login** on the Web UI. Password login is NOT available for this user.
+> - **Full account**: Run `add-user <username> <password>` to create a password-enabled account. This user can log in from anywhere (including via reverse proxy) with username + password.
 > - You can create multiple users. The first argument is the username, the second is the password.
 
 ### 2. Start / Stop / Status

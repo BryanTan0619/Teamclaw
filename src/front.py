@@ -44,6 +44,20 @@ INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "")
 PORT_OASIS = int(os.getenv("PORT_OASIS", "51202"))
 OASIS_BASE_URL = f"http://127.0.0.1:{PORT_OASIS}"
 
+# --- users.json 检查（密码登录时验证用户是否存在）---
+USERS_PATH = os.path.join(root_dir, "config", "users.json")
+
+def _user_exists_in_users_json(username: str) -> bool:
+    """检查用户名是否在 users.json 中（有密码记录）"""
+    if not os.path.exists(USERS_PATH):
+        return False
+    try:
+        with open(USERS_PATH, "r", encoding="utf-8") as f:
+            users = json.load(f)
+        return username in users
+    except Exception:
+        return False
+
 
 # --- Unified auth: before_request hook ---
 # Routes that do NOT require login
@@ -304,6 +318,14 @@ def proxy_login():
     # 密码登录
     if not password:
         return jsonify({"error": "password required"}), 400
+
+    # 检查用户是否在 users.json 中（有密码记录）
+    # 仅免密用户（不在 users.json 中）不允许密码登录
+    if not _user_exists_in_users_json(user_id):
+        return jsonify({
+            "error": f"用户 '{user_id}' 未设置密码，无法使用密码登录。"
+                     f"请使用「本机免密登录」，或通过 add-user 命令创建密码。"
+        }), 403
 
     try:
         r = requests.post(LOCAL_LOGIN_URL, json={"user_id": user_id, "password": password}, timeout=10)
