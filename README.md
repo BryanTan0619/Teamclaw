@@ -48,12 +48,17 @@ That's it. The AI agent will automatically:
 ```bash
 # Auto (recommended)
 scripts/setup_env.sh   # Linux/macOS
-scripts\setup_env.bat  # Windows
+scripts/setup_env.ps1  # Windows PowerShell
 
 # Manual
 uv venv .venv --python 3.11
 source .venv/bin/activate
 uv pip install -r config/requirements.txt
+```
+
+```powershell
+# PowerShell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup_env.ps1
 ```
 
 **2. API Key**
@@ -63,11 +68,21 @@ Set in `config/.env`:
 DEEPSEEK_API_KEY=your_deepseek_api_key_here
 ```
 
+```powershell
+# PowerShell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup_apikey.ps1
+```
+
 **3. Create User**
 
 ```bash
 scripts/adduser.sh     # Linux/macOS
-scripts\adduser.bat    # Windows
+scripts/adduser.ps1    # Windows PowerShell
+```
+
+```powershell
+# PowerShell
+powershell -ExecutionPolicy Bypass -File .\scripts\adduser.ps1
 ```
 
 **4. Start Services**
@@ -75,12 +90,17 @@ scripts\adduser.bat    # Windows
 ```bash
 # One-click
 scripts/start.sh       # Linux/macOS
-scripts\start.bat      # Windows
+scripts/start.ps1      # Windows PowerShell
 
 # Manual (3 terminals)
 python src/time.py         # Scheduler
 python src/mainagent.py    # Agent + MCP tools
 python src/front.py        # Web UI
+```
+
+```powershell
+# PowerShell
+powershell -ExecutionPolicy Bypass -File .\scripts\start.ps1
 ```
 
 Visit http://127.0.0.1:51209 after startup.
@@ -92,7 +112,7 @@ Visit http://127.0.0.1:51209 after startup.
 One-click exposure via Cloudflare Tunnel:
 ```bash
 python scripts/tunnel.py
-# Or interactively via run.sh — prompts "Deploy to public network? (y/N)"
+# Or interactively via run.sh / run.ps1 — prompts "Deploy to public network? (y/N)"
 ```
 Auto-downloads `cloudflared`, starts tunnels for Web UI + Bark push, captures public URLs, and writes them to `.env`. No account or DNS setup required.
 
@@ -329,7 +349,7 @@ python scripts/tunnel.py
 - Uses **Cloudflare Quick Tunnel** to automatically obtain a temporary `*.trycloudflare.com` domain
 - Auto-detects platform → downloads `cloudflared` if missing → starts tunnels → captures public URLs → writes to `.env`
 - Exposes both the **Web UI** (port 51209) and **Bark push service** (port 58010) simultaneously
-- Also available interactively via `run.sh` ("Deploy to public network? y/N")
+- Also available interactively via `run.sh` / `run.ps1` ("Deploy to public network? y/N")
 - Push notification click-through URLs are automatically configured — users can also override via AI chat
 
 #### Bidirectional OASIS
@@ -1038,7 +1058,7 @@ mainagent.py (FastAPI + LangGraph)  ── OpenAI-compatible API + Core Agent
 
 ```
 TeamClaw/
-├── run.sh / run.bat               # One-click run
+├── run.sh / run.ps1               # One-click run
 ├── scripts/                       # Env setup, start, tunnel, user management
 ├── packaging/                     # Windows exe / macOS DMG packaging
 ├── chatbot/                       # External bot services
@@ -1108,8 +1128,6 @@ MIT License
 
 ---
 
----
-
 <a id="中文"></a>
 
 # TeamClaw
@@ -1153,12 +1171,17 @@ TeamClaw 对外暴露标准 `/v1/chat/completions` 接口，可以被任何 Open
 ```bash
 # 自动（推荐）
 scripts/setup_env.sh   # Linux/macOS
-scripts\setup_env.bat  # Windows
+scripts/setup_env.ps1  # Windows PowerShell
 
 # 手动
 uv venv .venv --python 3.11
 source .venv/bin/activate
 uv pip install -r config/requirements.txt
+```
+
+```powershell
+# PowerShell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup_env.ps1
 ```
 
 **2. 配置 API Key**
@@ -1169,11 +1192,21 @@ uv pip install -r config/requirements.txt
 DEEPSEEK_API_KEY=your_deepseek_api_key_here
 ```
 
+```powershell
+# PowerShell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup_apikey.ps1
+```
+
 **3. 创建用户**
 
 ```bash
 scripts/adduser.sh     # Linux/macOS
-scripts\adduser.bat    # Windows
+scripts/adduser.ps1    # Windows PowerShell
+```
+
+```powershell
+# PowerShell
+powershell -ExecutionPolicy Bypass -File .\scripts\adduser.ps1
 ```
 
 **4. 启动服务**
@@ -1181,12 +1214,17 @@ scripts\adduser.bat    # Windows
 ```bash
 # 一键启动
 scripts/start.sh       # Linux/macOS
-scripts\start.bat      # Windows
+scripts/start.ps1      # Windows PowerShell
 
 # 手动分别启动（3 个终端）
 python src/time.py         # 定时调度
 python src/mainagent.py    # Agent + MCP 工具
 python src/front.py        # Web UI
+```
+
+```powershell
+# PowerShell
+powershell -ExecutionPolicy Bypass -File .\scripts\start.ps1
 ```
 
 启动后访问 http://127.0.0.1:51209 登录使用。
@@ -1199,7 +1237,7 @@ python src/front.py        # Web UI
 
 ```bash
 python scripts/tunnel.py
-# 或通过 run.sh 交互启动——提示"是否部署到公网？(y/N)"
+# 或通过 run.sh / run.ps1 交互启动——提示"是否部署到公网？(y/N)"
 ```
 自动下载 `cloudflared`，启动 Web UI + Bark 推送双隧道，捕获公网地址写入 `.env`，无需账户或 DNS 配置。
 
@@ -1436,7 +1474,7 @@ python scripts/tunnel.py
 - 使用 **Cloudflare Quick Tunnel**，自动获取临时 `*.trycloudflare.com` 域名
 - 全自动流程：检测平台 → 下载 `cloudflared`（若缺失）→ 启动隧道 → 捕获公网地址 → 写入 `.env`
 - 同时暴露 **Web UI**（端口 51209）和 **Bark 推送服务**（端口 58010）
-- 也可通过 `run.sh` 交互启动（提示"是否部署到公网？y/N"）
+- 也可通过 `run.sh` / `run.ps1` 交互启动（提示"是否部署到公网？y/N"）
 - 推送通知的点击跳转地址自动配置——用户还可通过 AI 对话自行覆盖
 
 #### 双向 OASIS 能力
@@ -1693,7 +1731,7 @@ Agent 通过 MCP 协议集成 7 个工具服务，所有工具的 `username` 参
 
 ```
 TeamClaw/
-├── run.sh / run.bat               # 一键运行
+├── run.sh / run.ps1               # 一键运行
 ├── scripts/                       # 环境配置、启动、隧道、用户管理脚本
 ├── packaging/                     # Windows exe / macOS DMG 打包
 ├── chatbot/                       # 外部 Bot 服务
