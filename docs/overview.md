@@ -69,7 +69,6 @@ Use TeamClaw as a bridge layer for bots, external tools, or other OpenAI-compati
 
 ## Where To Go Next
 
-- Installation and service commands: `SKILL.md`
-- Windows and WSL setup: [windows.md](./windows.md)
+- Installation, Windows, and WSL setup: `SKILL.md`
 - CLI usage: [cli.md](./cli.md)
 - Ports and service map: [ports.md](./ports.md)

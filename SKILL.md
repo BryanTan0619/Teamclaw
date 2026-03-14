@@ -39,7 +39,6 @@ Use this skill to install, configure, and run TeamClaw locally.
 
 For non-install background material, see:
 
-- [docs/windows.md](./docs/windows.md)
 - [docs/cli.md](./docs/cli.md)
 - [docs/overview.md](./docs/overview.md)
 
@@ -103,7 +102,26 @@ powershell -ExecutionPolicy Bypass -File selfskill/scripts/run.ps1 start
 
 ### Windows WSL Fallback
 
-If the user wants to reuse the shell scripts directly, follow [docs/windows.md](./docs/windows.md) and use the Linux or macOS commands inside WSL.
+If the user wants to reuse the existing shell scripts directly:
+
+```powershell
+wsl --install -d Ubuntu
+```
+
+This first step must be run in an elevated PowerShell window. If the current shell is not Administrator, WSL installation and Windows feature checks will fail.
+
+Then inside WSL:
+
+```bash
+sudo apt update
+sudo apt install -y curl git python3 python3-venv python3-pip
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.bashrc
+cd /mnt/c/Users/<user>/Downloads/BorisGuo6.github.io/TeamClaw
+bash selfskill/scripts/run.sh setup
+bash selfskill/scripts/run.sh configure --init
+bash selfskill/scripts/run.sh start
+```
 
 ## Required Configuration
 
@@ -123,6 +141,18 @@ When `LLM_MODEL` is not given by the user:
 4. Print the available model list only
 5. Let the caller or agent choose one model from the output
 6. Run `configure LLM_MODEL <model>`
+
+## Tested Installation Notes
+
+These notes come from a full Windows installation that was verified locally.
+
+- On some Windows machines, the default ports `51200`, `51201`, `51202`, and `51209` fall inside Windows excluded port ranges. The PowerShell entrypoints now auto-remap them to a safe set and write the new values into `config/.env`.
+- Because of that remap, the correct local URL is always `http://127.0.0.1:<PORT_FRONTEND>`, not a hardcoded `http://127.0.0.1:51209`.
+- On Windows, all PowerShell entrypoints and all MCP subprocesses must use `.venv\Scripts\python.exe`. Relying on the system `python` command or App Execution Alias can break startup.
+- `scripts/start.ps1` should run headless. Otherwise `chatbot/setup.py` may block startup in non-interactive PowerShell runs.
+- `gpt-5.4` has been tested successfully with `LLM_BASE_URL=https://api.openai.com/` and TeamClaw's `/v1/chat/completions` endpoint.
+- `auto-model` is for discovery only. It should print the model list, and the caller or agent should pick one model explicitly afterward.
+- If WSL is not already installed, the first WSL setup step requires Administrator privileges on Windows before the Linux-side TeamClaw install can be tested.
 
 ## Common Operations
 
@@ -148,10 +178,10 @@ powershell -ExecutionPolicy Bypass -File selfskill/scripts/run.ps1 auto-model
 
 ## Defaults and Notes
 
-- Default local Web UI: `http://127.0.0.1:51209`
-- Local `127.0.0.1` access supports passwordless login
-- Password users are optional
-- OpenClaw, bots, and tunnel setup are optional and should be user-driven
+- Default local Web UI is `http://127.0.0.1:51209`, but Windows may auto-switch it to another local port. Check `PORT_FRONTEND` in `config/.env` or run `status`.
+- Local `127.0.0.1` access supports passwordless login.
+- Password users are optional.
+- OpenClaw, bots, and tunnel setup are optional and should be user-driven.
 
 ## Optional Commands
 
