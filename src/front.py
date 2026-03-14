@@ -281,9 +281,29 @@ def proxy_check_session():
 
 @app.route("/proxy_login", methods=["POST"])
 def proxy_login():
-    """代理登录请求到后端 Agent"""
+    """代理登录请求到后端 Agent
+    
+    支持两种登录方式：
+    1. 密码登录：user_id + password
+    2. 本机免密登录：本地 127.0.0.1 直连时，只需要 user_id，不需要密码
+    """
     user_id = request.json.get("user_id", "")
     password = request.json.get("password", "")
+    is_local = _is_direct_local_request()
+
+    # 本机免密登录：127.0.0.1 直连且未提供密码时
+    if is_local and not password:
+        # 直接创建 session，不需要验证密码
+        if user_id:
+            session["user_id"] = user_id
+            session.permanent = True
+            return jsonify({"ok": True, "user_id": user_id, "mode": "local_no_password"})
+        else:
+            return jsonify({"error": "user_id required"}), 400
+
+    # 密码登录
+    if not password:
+        return jsonify({"error": "password required"}), 400
 
     try:
         r = requests.post(LOCAL_LOGIN_URL, json={"user_id": user_id, "password": password}, timeout=10)

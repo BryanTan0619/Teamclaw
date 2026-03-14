@@ -14,6 +14,7 @@ const i18n = {
         username: '用户名',
         password: '密码',
         login_btn: '登录',
+        local_login_btn: '本机免密登录',
         login_verifying: '验证中...',
         login_error_invalid: '用户名只能包含字母、数字、下划线、短横线或中文',
         login_error_failed: '登录失败',
@@ -504,6 +505,7 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         username: 'Username',
         password: 'Password',
         login_btn: 'Login',
+        local_login_btn: 'Local No-Password Login',
         login_verifying: 'Verifying...',
         login_error_invalid: 'Username can only contain letters, numbers, underscore, hyphen or Chinese',
         login_error_failed: 'Login failed',
@@ -2025,6 +2027,74 @@ async function switchToSession(sessionId, force = false) {
             setSystemBusyUI(false);
         }
     } catch(e) {}
+}
+
+// ===== 本机免密登录 =====
+async function handleLocalLogin() {
+    const nameInput = document.getElementById('username-input');
+    const errorDiv = document.getElementById('login-error');
+    const localLoginBtn = document.getElementById('local-login-btn');
+    const name = nameInput.value.trim();
+
+    errorDiv.classList.add('hidden');
+
+    if (!name) {
+        errorDiv.textContent = '请输入用户名';
+        errorDiv.classList.remove('hidden');
+        nameInput.focus();
+        return;
+    }
+
+    if (!/^[a-zA-Z0-9_\-\u4e00-\u9fa5]+$/.test(name)) {
+        errorDiv.textContent = t('login_error_invalid');
+        errorDiv.classList.remove('hidden');
+        return;
+    }
+
+    localLoginBtn.disabled = true;
+    localLoginBtn.textContent = t('login_verifying');
+
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
+        const resp = await fetch("/proxy_login", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: name, password: "" }),
+            signal: controller.signal
+        });
+        clearTimeout(timeout);
+        let data;
+        try { data = await resp.json(); } catch (_) { data = { error: 'Invalid server response' }; }
+        if (!resp.ok) {
+            errorDiv.textContent = data.detail || data.error || t('login_error_failed');
+            errorDiv.classList.remove('hidden');
+            return;
+        }
+
+        currentUserId = name;
+        sessionStorage.setItem('userId', name);
+        initSession();
+
+        document.getElementById('uid-display').textContent = 'UID: ' + name;
+        document.getElementById('login-screen').style.display = 'none';
+        document.getElementById('chat-screen').style.display = 'flex';
+        document.getElementById('user-input').focus();
+        loadTools();
+        refreshOasisTopics();
+        startHistoryPolling();
+        switchPage('group');
+    } catch (e) {
+        if (e.name === 'AbortError') {
+            errorDiv.textContent = '连接超时，请确认后端服务已启动后重试';
+        } else {
+            errorDiv.textContent = t('login_error_network') + ': ' + e.message;
+        }
+        errorDiv.classList.remove('hidden');
+    } finally {
+        localLoginBtn.disabled = false;
+        localLoginBtn.textContent = t('local_login_btn') || '本机免密登录';
+    }
 }
 
 // ===== 登录逻辑 =====
