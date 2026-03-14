@@ -87,11 +87,16 @@ def _unified_auth_check():
 
     1. 公开路由 → 放行
     2. 本机直连（127.0.0.1 且无代理头）→ 放行
+       - 如果请求携带 X-User-Id header，自动注入 session（CLI 场景）
     3. 其余一律要登录（包括所有反向代理转发的请求）
     """
     if request.endpoint in _PUBLIC_ROUTES:
         return None
     if _is_direct_local_request():
+        # CLI / 内部调用：如果带了 X-User-Id，注入到 Flask session
+        header_uid = request.headers.get("X-User-Id", "").strip()
+        if header_uid and not session.get("user_id"):
+            session["user_id"] = header_uid
         return None
     if not session.get('user_id'):
         return jsonify({'error': '未登录'}), 401

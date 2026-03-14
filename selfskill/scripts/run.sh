@@ -15,6 +15,10 @@
 #   bash selfskill/scripts/run.sh configure --show               # 查看当前配置
 #   bash selfskill/scripts/run.sh configure --init               # 从模板初始化 .env
 #   bash selfskill/scripts/run.sh check-openclaw                 # 检测/安装 OpenClaw
+#   bash selfskill/scripts/run.sh cli chat "你好"                # CLI: 发送消息
+#   bash selfskill/scripts/run.sh cli sessions                   # CLI: 查看会话
+#   bash selfskill/scripts/run.sh cli settings                   # CLI: 查看设置
+#   bash selfskill/scripts/run.sh cli status                     # CLI: 服务状态
 #
 # 所有命令均为非交互式，适合自动化调用。
 
@@ -159,6 +163,13 @@ case "${1:-help}" in
         # 查询 API 可用模型列表（打印供 agent 选择，不自动写入）
         python selfskill/scripts/configure.py --auto-model
         exit 0
+        ;;
+
+    cli)
+        # CLI 控制工具：像操作前端一样控制 Agent
+        shift
+        python scripts/cli.py "$@"
+        exit $?
         ;;
 
     check-openclaw)
@@ -383,6 +394,7 @@ case "${1:-help}" in
         echo "  configure --init               从模板初始化 .env"
         echo "  auto-model                     查询 API 可用模型列表（供 agent 选择）"
         echo "  check-openclaw                 检测/安装 OpenClaw 并自动配置集成"
+        echo "  cli <command> [args]           命令行控制工具（chat/sessions/settings 等）"
         echo "  help                           显示此帮助"
         exit 0
         ;;

@@ -55,8 +55,8 @@
   - 反向代理：将浏览器请求转发到 Agent / OASIS 等内部服务
   - Session 管理、PWA 支持
 - **安全策略**：
-  - 本地直连（`127.0.0.1`，无 CF 头）→ 信任放行
-  - Cloudflare Tunnel 流量（`127.0.0.1` + `Cf-*` 头）→ 要求 Session 登录
+  - 本地直连（`127.0.0.1` 且无任何代理头）→ 信任放行
+  - 经过任何反向代理的请求 → 要求 Session 登录
   - 公开路由（login、static、OpenAI compat）→ 始终放行
 - **唯一对外暴露的核心端口**
 
@@ -120,164 +120,166 @@ PORT_FRONTEND=51209
 
 ---
 
-## 反向代理安全检查
+## front.py 全部接口（:51209）
 
-> 以下是 `front.py` 中实施的安全措施，以及常见反向代理攻防场景说明。
+### 页面 & 静态资源
 
-### 当前已实施的安全层
+- `GET /` — 登录/主页面
+- `GET /manifest.json` — PWA manifest
+- `GET /sw.js` — Service Worker
 
-#### 1. Tunnel 流量识别（Loopback 信任分离）
+### OpenAI 兼容（→ :51200）
 
-**威胁**：Cloudflare Tunnel（cloudflared）在本机运行，转发公网流量到 `127.0.0.1:51209`，导致 `remote_addr` = `127.0.0.1`。如果无差别信任 loopback，公网攻击者可绕过登录。
+- `POST /v1/chat/completions` — 聊天补全（公开路由，Bearer Token 鉴权）
+- `GET /v1/models` — 模型列表（公开路由）
 
-**措施**：检测 Cloudflare 注入的特征头来区分：
+### 登录 & 会话
 
-| 检测头 | 说明 |
-|--------|------|
-| `Cf-Connecting-Ip` | 真实客户端 IP |
-| `Cf-Ray` | 请求的唯一追踪 ID |
-| `Cf-Ipcountry` | 客户端所在国家 |
+- `POST /proxy_login` — 登录（公开路由，→ :51200 `/login`）
+- `POST /proxy_logout` — 登出
+- `GET /proxy_check_session` — 检查登录状态（公开路由）
 
-**逻辑**：
-```python
-# 本地直连（无 CF 头）→ 信任
-if _is_loopback_request() and not _is_tunnel_request():
-    return None  # 放行
+### Agent 代理（→ :51200）
 
-# 经 tunnel 进来（有 CF 头）→ 必须登录
-if not session.get('user_id'):
-    return 401
+- `POST /proxy_cancel` — 取消生成（→ `/cancel`）
+- `POST /proxy_tts` — 语音合成（→ `/tts`）
+- `GET /proxy_tools` — 工具列表（→ `/tools`）
+- `GET /proxy_settings` — 获取设置（→ `/settings`）
+- `POST /proxy_settings` — 更新设置（→ `/settings`）
+- `GET /proxy_settings_full` — 获取完整设置（→ `/settings/full`）
+- `POST /proxy_settings_full` — 更新完整设置（→ `/settings/full`）
+- `POST /proxy_restart` — 重启服务（→ `/restart`）
+- `GET /proxy_sessions` — 会话列表（→ `/sessions`）
+- `GET /proxy_sessions_status` — 会话状态（→ `/sessions_status`）
+- `POST /proxy_session_history` — 会话历史（→ `/session_history`）
+- `POST /proxy_session_status` — 单会话状态（→ `/session_status`）
+- `POST /proxy_delete_session` — 删除会话（→ `/delete_session`）
+
+### 群组聊天代理（→ :51200）
+
+- `GET /proxy_groups` — 群组列表（→ `/groups`）
+- `POST /proxy_groups` — 创建群组（→ `/groups`）
+- `GET /proxy_groups/<id>` — 群组详情（→ `/groups/<id>`）
+- `PUT /proxy_groups/<id>` — 更新群组（→ `/groups/<id>`）
+- `DELETE /proxy_groups/<id>` — 删除群组（→ `/groups/<id>`）
+- `GET /proxy_groups/<id>/messages` — 获取消息（→ `/groups/<id>/messages`）
+- `POST /proxy_groups/<id>/messages` — 发送消息（→ `/groups/<id>/messages`）
+- `POST /proxy_groups/<id>/mute` — 静音（→ `/groups/<id>/mute`）
+- `POST /proxy_groups/<id>/unmute` — 取消静音（→ `/groups/<id>/unmute`）
+- `GET /proxy_groups/<id>/mute_status` — 静音状态（→ `/groups/<id>/mute_status`）
+- `GET /proxy_groups/<id>/sessions` — 群组会话（→ `/groups/<id>/sessions`）
+
+### OASIS 代理（→ :51202）
+
+- `GET /proxy_oasis/topics` — 话题列表
+- `GET /proxy_oasis/topics/<id>` — 话题详情
+- `GET /proxy_oasis/topics/<id>/stream` — 话题讨论 SSE 流
+- `POST /proxy_oasis/topics/<id>/cancel` — 取消讨论
+- `POST /proxy_oasis/topics/<id>/purge` — 清除话题
+- `DELETE /proxy_oasis/topics` — 删除话题
+- `GET /proxy_oasis/experts` — 专家列表
+
+### OpenClaw 代理（→ :51202）
+
+- `GET /proxy_openclaw_sessions` — OpenClaw 会话列表
+- `POST /proxy_openclaw_add` — 添加 OpenClaw Agent
+- `GET /proxy_openclaw_default_workspace` — 默认工作区
+- `GET /proxy_openclaw_workspace_files` — 工作区文件列表
+- `GET /proxy_openclaw_workspace_file` — 读取工作区文件
+- `POST /proxy_openclaw_workspace_file` — 保存工作区文件
+- `GET /proxy_openclaw_agent_detail` — Agent 详情
+- `GET /proxy_openclaw_skills` — 技能列表
+- `GET /proxy_openclaw_tool_groups` — 工具组列表
+- `POST /proxy_openclaw_update_config` — 更新配置
+- `GET /proxy_openclaw_channels` — 频道列表
+- `GET /proxy_openclaw_agent_bindings` — Agent 绑定
+- `POST /proxy_openclaw_agent_bind` — 绑定 Agent
+- `DELETE /proxy_openclaw_remove` — 移除 Agent
+
+### OpenClaw 快照
+
+- `GET /team_openclaw_snapshot` — 获取快照
+- `POST /team_openclaw_snapshot/export` — 导出单个快照
+- `POST /team_openclaw_snapshot/export_all` — 导出全部快照
+- `POST /team_openclaw_snapshot/sync_all` — 同步全部快照
+- `POST /team_openclaw_snapshot/restore` — 恢复单个快照
+- `POST /team_openclaw_snapshot/restore_all` — 恢复全部快照
+
+### 可视化编排代理（本地处理 / → :51202）
+
+- `GET /proxy_visual/experts` — 专家列表（含自定义）
+- `POST /proxy_visual/experts/custom` — 添加自定义专家
+- `DELETE /proxy_visual/experts/custom/<tag>` — 删除自定义专家
+- `POST /proxy_visual/generate-yaml` — 生成 YAML 工作流
+- `POST /proxy_visual/agent-generate-yaml` — AI 生成 YAML
+- `POST /proxy_visual/save-layout` — 保存布局
+- `GET /proxy_visual/load-layouts` — 布局列表
+- `GET /proxy_visual/load-layout/<name>` — 加载布局
+- `GET /proxy_visual/load-yaml-raw/<name>` — 原始 YAML
+- `DELETE /proxy_visual/delete-layout/<name>` — 删除布局
+- `POST /proxy_visual/upload-yaml` — 上传 YAML
+- `GET /proxy_visual/sessions-status` — 编排会话状态
+
+### Tunnel 管理
+
+- `GET /proxy_tunnel/status` — Tunnel 状态
+- `POST /proxy_tunnel/start` — 启动 Tunnel
+- `POST /proxy_tunnel/stop` — 停止 Tunnel
+
+### Internal Agents 管理
+
+- `GET /internal_agents` — Agent 列表
+- `POST /internal_agents` — 创建 Agent
+- `PUT|PATCH /internal_agents/<sid>` — 更新 Agent
+- `DELETE /internal_agents/<sid>` — 删除 Agent
+
+### Teams 管理
+
+- `GET /teams` — 团队列表
+- `POST /teams` — 创建团队
+- `DELETE /teams/<name>` — 删除团队
+- `GET /teams/<name>/members` — 成员列表
+- `POST /teams/<name>/members/external` — 添加外部成员
+- `DELETE /teams/<name>/members/external` — 移除外部成员
+- `PUT /teams/<name>/members/external` — 更新外部成员
+- `GET /teams/<name>/experts` — 团队专家列表
+- `POST /teams/<name>/experts` — 添加团队专家
+- `PUT /teams/<name>/experts/<tag>` — 更新团队专家
+- `DELETE /teams/<name>/experts/<tag>` — 删除团队专家
+- `POST /teams/snapshot/download` — 下载团队快照
+- `POST /teams/snapshot/upload` — 上传团队快照
+
+## 鉴权规则
+
+**原则：不是 127.0.0.1 直连就要密码。**
+
+```
+if 公开路由 → 放行
+if 127.0.0.1 且无代理头 → 放行（本机直连）
+else → 要求登录
 ```
 
-| 场景 | remote_addr | CF 头 | 结果 |
-|------|-------------|-------|------|
-| 本地浏览器直连 | `127.0.0.1` | ❌ 无 | ✅ 信任放行 |
-| 本地 agent / MCP 工具 | `127.0.0.1` | ❌ 无 | ✅ 信任放行 |
-| 公网经 Cloudflare Tunnel | `127.0.0.1` | ✅ 有 | ⛔ 要求 Session 登录 |
-| 外网直连（无 tunnel） | 外部 IP | ❌ 无 | ⛔ 要求 Session 登录 |
+### 检测的反向代理头
 
-#### 2. 代理头伪造检测（Header Injection 防御）
+以下任一头存在，即视为经过反向代理，**必须登录**：
 
-**威胁**：攻击者在**非代理**的直连请求中伪造 `X-Forwarded-For`、`X-Real-Ip` 等头，试图欺骗应用认为请求来自可信 IP。
+- `X-Forwarded-For` — Nginx / Caddy / Traefik / HAProxy / 通用
+- `X-Forwarded-Proto` — Nginx / Caddy / 通用
+- `X-Forwarded-Host` — Nginx / Traefik
+- `X-Real-Ip` — Nginx
+- `Cf-Connecting-Ip` — Cloudflare Tunnel
+- `Cf-Ray` — Cloudflare Tunnel
+- `True-Client-Ip` — Cloudflare / Akamai
+- `Forwarded` — RFC 7239 标准头
+- `Via` — HTTP 标准代理头
 
-**措施**：如果请求不是来自已知代理（无 CF 头），但携带了代理专属头，直接拒绝（403）：
+### 判定结果
 
-```
-被检测的伪造头：
-├── X-Forwarded-For
-├── X-Forwarded-Proto
-├── X-Forwarded-Host
-└── X-Real-Ip
-```
-
-**为什么重要**：很多应用使用 `X-Forwarded-For` 的第一个值做 IP 访问控制，如果不清洗这些头，攻击者可以伪造成任意 IP。
-
-#### 3. URL / 请求头注入防御
-
-**威胁**：
-- **Null byte 注入**（`%00`）：在 URL 中插入空字节，可能导致路径截断、绕过安全检查、目录遍历
-- **超长 URL / Header**：通过异常长的 URL 或头值，造成缓冲区溢出、DoS、或 smuggling 攻击
-
-**措施**：
-| 检查项 | 阈值 | 响应码 |
-|--------|------|--------|
-| URL 中含 `\x00` 或 `%00` | 发现即拒绝 | 400 |
-| URL 总长度 | > 8192 字节 | 414 |
-| 任意 Header 值 | > 8192 字节 | 431 |
-
-#### 4. 内部服务通信鉴权
-
-**措施**：`front.py` 向内部服务（Agent、OASIS）转发请求时，使用 `X-Internal-Token` 而非用户密码：
-
-```
-浏览器 → front.py (Session 鉴权) → Agent/OASIS (X-Internal-Token 鉴权)
-```
-
-这确保即使 Session 被窃取，也无法直接调用内部 API（因为 `INTERNAL_TOKEN` 不会暴露给浏览器）。
-
-### 常见反向代理攻击场景 & 应对
-
-#### 🔴 HTTP Request Smuggling
-
-**描述**：利用前端代理（如 Nginx）和后端应用对 HTTP 请求边界的解析差异，在一个 TCP 连接中"走私"第二个请求。
-
-**本项目风险**：**低**。`front.py` 使用 Python `requests` 库向后端发起**独立的** HTTP 请求（不是 TCP 流量透传），每次转发都是全新连接，不存在连接复用的 smuggling 窗口。
-
-**如果将来加 Nginx**：需要：
-- 确保 Nginx 和 Flask 使用相同的 HTTP 解析器行为
-- 禁用 Nginx 的 `proxy_http_version 1.0`，改用 `1.1`
-- 设置 `proxy_request_buffering on`
-
-#### 🔴 SSRF（Server-Side Request Forgery）
-
-**描述**：攻击者通过代理让服务器向内部网络发请求（如 `http://127.0.0.1:51200/admin`）。
-
-**本项目风险**：**低**。`front.py` 的代理端点都是**硬编码目标 URL**（如 `LOCAL_AGENT_URL`），不接受用户指定 URL。没有"开放代理"端点。
-
-**检查清单**：
-- ✅ 所有 `requests.get/post` 的 URL 是硬编码常量
-- ✅ 没有 `url = request.args.get('url')` 模式
-- ✅ 用户输入只作为 JSON body / query param，不拼接到 URL 路径中
-
-#### 🔴 Host Header 攻击
-
-**描述**：攻击者伪造 `Host` 头，可导致缓存投毒、密码重置链接篡改、或绕过虚拟主机路由。
-
-**本项目风险**：**低**。`front.py` 不使用 `request.host` 来生成任何 URL 或做路由决策。内部转发的目标地址都是硬编码的 `127.0.0.1:PORT`。
-
-**如果将来使用 `url_for(..., _external=True)`**：需要限制 `Host` 头的合法值。
-
-#### 🔴 WebSocket 劫持（Cross-Site WebSocket Hijacking）
-
-**描述**：恶意网页通过 JavaScript 发起 WebSocket 连接到目标应用，浏览器会自动带上 Cookie。如果服务端不校验 Origin，攻击者可以代替用户操作。
-
-**本项目风险**：**中等**。前端使用 SSE（Server-Sent Events）而非 WebSocket，但如果将来引入 WebSocket：
-- 必须在握手阶段校验 `Origin` 头
-- 必须校验 Session
-
-#### 🟡 Session 固定 / Session 劫持
-
-**描述**：攻击者获取或固定一个 Session ID，然后以受害者身份访问。
-
-**当前措施**：
-- ✅ `session.permanent = True` + 8 小时过期
-- ✅ 登录成功后设置新 session
-- ⚠️ `app.secret_key = os.urandom(24)`：每次重启生成新密钥，所有旧 session 失效（安全但用户需重新登录）
-- ⚠️ 未设置 `SESSION_COOKIE_SECURE`（因为本地开发可能非 HTTPS）
-- ⚠️ 未设置 `SESSION_COOKIE_HTTPONLY`（建议开启，防止 XSS 读取 Cookie）
-- ⚠️ 未设置 `SESSION_COOKIE_SAMESITE`（建议设为 `Lax`，防止 CSRF）
-
-**建议加固**（在检测到 tunnel/公网模式时自动启用）：
-```python
-app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-# 如果配置了 PUBLIC_DOMAIN（HTTPS 公网）：
-# app.config['SESSION_COOKIE_SECURE'] = True
-```
-
-#### 🟡 CORS 配置
-
-**当前状态**：仅 `/v1/chat/completions`（OpenAI 兼容端点）设置了 `Access-Control-Allow-Origin: *`。
-
-**风险**：该端点本身有独立的 Authorization Bearer Token 鉴权，`*` 是合理的（兼容第三方客户端）。其他端点未设置 CORS 头，浏览器同源策略默认拦截跨域请求，这是安全的。
-
-**注意**：如果将来某个端点需要跨域，不要用 `*` + `credentials: include`，这会导致 Cookie 泄露。
-
-### 安全检查速查表
-
-| 检查项 | 状态 | 说明 |
-|--------|------|------|
-| Tunnel 流量识别 | ✅ 已实施 | 通过 CF 头区分本地 vs tunnel |
-| 代理头伪造检测 | ✅ 已实施 | 拒绝直连中携带 `X-Forwarded-*` |
-| Null byte 注入 | ✅ 已实施 | URL 中 `\x00` / `%00` → 400 |
-| 超长 URL/Header | ✅ 已实施 | > 8KB → 414/431 |
-| 内部通信鉴权 | ✅ 已实施 | `X-Internal-Token` |
-| Session 过期 | ✅ 已实施 | 8 小时自动过期 |
-| SSRF 防御 | ✅ 架构安全 | 无开放代理端点 |
-| Request Smuggling | ✅ 架构安全 | 独立连接转发，无流复用 |
-| Host Header 攻击 | ✅ 架构安全 | 不依赖 Host 头 |
-| Cookie HttpOnly | ⚠️ 建议加固 | 防 XSS 读取 Session Cookie |
-| Cookie SameSite | ⚠️ 建议加固 | 防 CSRF |
-| Cookie Secure | ⚠️ 公网部署时 | HTTPS 场景下启用 |
-| WebSocket Origin | ℹ️ 暂不适用 | 当前使用 SSE，无 WS |
-| CORS | ✅ 合理配置 | 仅 OpenAI 端点允许 `*` |
+| 场景 | 结果 |
+|------|------|
+| 本地浏览器 `127.0.0.1` 直连 | ✅ 放行 |
+| 本地 agent / MCP 工具直连 | ✅ 放行 |
+| Cloudflare Tunnel 转发（带 `Cf-Ray`） | ⛔ 要登录 |
+| Nginx 反代转发（带 `X-Forwarded-For`） | ⛔ 要登录 |
+| Caddy / Traefik / HAProxy 转发 | ⛔ 要登录 |
+| 外网 IP 直连 | ⛔ 要登录 |
