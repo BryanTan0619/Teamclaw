@@ -1273,7 +1273,7 @@ def proxy_group_sessions(group_id):
 @app.route("/proxy_oasis/topics")
 def proxy_oasis_topics():
     """Proxy: list OASIS discussion topics for the logged-in user."""
-    user_id = session.get("user_id", ""), 200
+    user_id = session.get("user_id", "")
     try:
         print(f"[OASIS Proxy] Fetching topics from {OASIS_BASE_URL}/topics for user={user_id}")
         r = requests.get(f"{OASIS_BASE_URL}/topics", params={"user_id": user_id}, timeout=10)
