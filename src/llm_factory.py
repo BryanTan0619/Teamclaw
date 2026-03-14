@@ -1,53 +1,40 @@
 """
-LLM 厂商路由工厂 —— 全局共享
+Factory helpers for creating the shared LangChain chat model instance.
 
-根据环境变量 (LLM_PROVIDER / LLM_MODEL / LLM_BASE_URL / LLM_API_KEY)
-自动推断厂商并返回对应的 LangChain ChatModel 实例。
-
-支持：Google Gemini / Anthropic Claude / DeepSeek / OpenAI 兼容兜底
-所有 provider 均支持 base_url 透传（可接中转代理）。
-
-同时提供 extract_text() 统一提取 AIMessage.content 为纯文本字符串。
+This module supports provider-specific SDKs when available and falls back to
+OpenAI-compatible routing for the rest. It also normalizes OpenAI base URLs so
+users can provide either a root URL or a full endpoint URL.
 """
 
+from __future__ import annotations
+
 import os
+from urllib.parse import urlparse
+
 from langchain_core.language_models.chat_models import BaseChatModel
 
 
-# ======================================================================
-# 统一文本提取：AIMessage.content -> str
-# ======================================================================
-
 def extract_text(content) -> str:
-    """从 AIMessage.content 提取纯文本。
-
-    不同厂商的 SDK 返回格式不同：
-      - ChatOpenAI / ChatDeepSeek / ChatAnthropic: str
-      - ChatGoogleGenerativeAI: list[dict]  (例如 [{"type":"text","text":"..."}])
-
-    本函数统一处理为纯字符串。
-    """
+    """Convert provider-specific message payloads into plain text."""
     if isinstance(content, str):
         return content
+
     if isinstance(content, list):
         parts = []
         for block in content:
             if isinstance(block, str):
                 parts.append(block)
-            elif isinstance(block, dict):
-                if block.get("type") == "text":
-                    parts.append(block.get("text", ""))
-                # 跳过 thought_signature 等非文本 block
+            elif isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", ""))
         return "".join(parts)
+
     return str(content)
 
-# 模型名 -> 厂商 的自动推断映射
+
 _MODEL_PROVIDER_PATTERNS: dict[str, str] = {
-    # 有专用 LangChain 包的厂商
     "gemini": "google",
     "claude": "anthropic",
     "deepseek": "deepseek",
-    # 以下统一走 ChatOpenAI（兼容 OpenAI 格式）
     "gpt": "openai",
     "o1": "openai",
     "o3": "openai",
@@ -66,21 +53,56 @@ _MODEL_PROVIDER_PATTERNS: dict[str, str] = {
     "groq": "openai",
 }
 
-# 不支持自定义 temperature 的模型前缀（如 OpenAI 推理模型 o1/o3/o4 系列）
-# 这些模型只允许 temperature=1，传其他值会报 400 错误
-_NO_TEMPERATURE_PREFIXES = ("o1", "o3", "o4")
+_NO_TEMPERATURE_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+_RESPONSES_API_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+_OPENAI_ENDPOINT_SUFFIXES = (
+    "/v1/chat/completions",
+    "/chat/completions",
+    "/v1/responses",
+    "/responses",
+    "/v1/models",
+    "/models",
+)
+
+
+def _model_has_prefix(model: str, prefix: str) -> bool:
+    model_lower = model.lower()
+    if not model_lower.startswith(prefix):
+        return False
+
+    return len(model_lower) == len(prefix) or model_lower[len(prefix)] in "-_."
 
 
 def _model_supports_temperature(model: str) -> bool:
-    """检查模型是否支持自定义 temperature 参数。"""
-    model_lower = model.lower()
-    for prefix in _NO_TEMPERATURE_PREFIXES:
-        if model_lower.startswith(prefix) and (
-            len(model_lower) == len(prefix)        # 精确匹配 "o1"
-            or model_lower[len(prefix)] in "-_."   # 匹配 "o3-mini", "o4-mini" 等
-        ):
-            return False
-    return True
+    return not any(_model_has_prefix(model, prefix) for prefix in _NO_TEMPERATURE_PREFIXES)
+
+
+def _normalize_openai_base_url(base_url: str) -> str:
+    cleaned = (base_url or "https://api.deepseek.com").strip().rstrip("/")
+    cleaned_lower = cleaned.lower()
+
+    for suffix in _OPENAI_ENDPOINT_SUFFIXES:
+        if cleaned_lower.endswith(suffix):
+            cleaned = cleaned[: -len(suffix)]
+            cleaned_lower = cleaned.lower()
+            break
+
+    if not cleaned_lower.endswith("/v1"):
+        cleaned = cleaned.rstrip("/") + "/v1"
+
+    return cleaned
+
+
+def _is_native_openai_host(base_url: str) -> bool:
+    parsed = urlparse(base_url)
+    host = (parsed.netloc or parsed.path).lower()
+    return host == "api.openai.com" or host.endswith(".openai.com")
+
+
+def _should_use_responses_api(model: str, base_url: str) -> bool:
+    return _is_native_openai_host(base_url) and any(
+        _model_has_prefix(model, prefix) for prefix in _RESPONSES_API_PREFIXES
+    )
 
 
 def create_chat_model(
@@ -91,13 +113,12 @@ def create_chat_model(
     max_retries: int = 2,
 ) -> BaseChatModel:
     """
-    读取环境变量，自动路由到正确的厂商 SDK 并返回 ChatModel。
+    Create a chat model from TeamClaw environment variables.
 
-    可覆盖的参数：temperature / max_tokens / timeout / max_retries
-    模型、API Key、Base URL、Provider 均从环境变量读取。
-
-    注意：对不支持自定义 temperature 的模型（如 OpenAI o1/o3/o4 推理系列），
-    会自动忽略 temperature 参数，使用模型默认值。
+    Required env vars:
+      - LLM_API_KEY
+      - LLM_MODEL
+      - LLM_BASE_URL (optional for providers with hosted defaults)
     """
     api_key = os.getenv("LLM_API_KEY")
     base_url = os.getenv("LLM_BASE_URL", "https://api.deepseek.com").strip()
@@ -105,73 +126,81 @@ def create_chat_model(
     provider = os.getenv("LLM_PROVIDER", "").strip().lower()
 
     if not api_key:
-        raise ValueError("未检测到 LLM_API_KEY，请在环境变量中设置。")
+        raise ValueError("LLM_API_KEY is not configured.")
 
-    # 对不支持 temperature 的模型，强制使用默认值 1
     supports_temp = _model_supports_temperature(model)
-    effective_temp = temperature if supports_temp else 1
 
-    # 1) 自动推断 provider
     if not provider:
         model_lower = model.lower()
-        for pattern, prov in _MODEL_PROVIDER_PATTERNS.items():
+        for pattern, detected_provider in _MODEL_PROVIDER_PATTERNS.items():
             if pattern in model_lower:
-                provider = prov
+                provider = detected_provider
                 break
         else:
             provider = "openai"
 
-    # 2) 根据 provider 构造 ChatModel
     if provider == "google":
         from langchain_google_genai import ChatGoogleGenerativeAI
-        kwargs = dict(
-            model=model,
-            google_api_key=api_key,
-            temperature=effective_temp,
-            max_output_tokens=max_tokens,
-            timeout=timeout,
-            max_retries=max_retries,
-        )
+
+        kwargs = {
+            "model": model,
+            "google_api_key": api_key,
+            "max_output_tokens": max_tokens,
+            "timeout": timeout,
+            "max_retries": max_retries,
+        }
+        if supports_temp:
+            kwargs["temperature"] = temperature
         if base_url:
             kwargs["base_url"] = base_url
         return ChatGoogleGenerativeAI(**kwargs)
 
     if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
-        kwargs = dict(
-            model=model,
-            api_key=api_key,
-            temperature=effective_temp,
-            max_tokens=max_tokens,
-            timeout=timeout,
-            max_retries=max_retries,
-        )
+
+        kwargs = {
+            "model": model,
+            "api_key": api_key,
+            "max_tokens": max_tokens,
+            "timeout": timeout,
+            "max_retries": max_retries,
+        }
+        if supports_temp:
+            kwargs["temperature"] = temperature
         if base_url:
             kwargs["base_url"] = base_url
         return ChatAnthropic(**kwargs)
 
     if provider == "deepseek":
         from langchain_deepseek import ChatDeepSeek
-        return ChatDeepSeek(
-            model=model,
-            api_key=api_key,
-            base_url=base_url,
-            temperature=effective_temp,
-            max_tokens=max_tokens,
-            timeout=timeout,
-            max_retries=max_retries,
-            use_responses_api=False,
-        )
 
-    # 默认: OpenAI 兼容格式
+        kwargs = {
+            "model": model,
+            "api_key": api_key,
+            "base_url": base_url,
+            "max_tokens": max_tokens,
+            "timeout": timeout,
+            "max_retries": max_retries,
+            "use_responses_api": False,
+        }
+        if supports_temp:
+            kwargs["temperature"] = temperature
+        return ChatDeepSeek(**kwargs)
+
     from langchain_openai import ChatOpenAI
-    openai_base = base_url.rstrip("/") + "/v1"
-    return ChatOpenAI(
-        model=model,
-        base_url=openai_base,
-        api_key=api_key,
-        temperature=effective_temp,
-        max_tokens=max_tokens,
-        timeout=timeout,
-        max_retries=max_retries,
-    )
+
+    openai_base = _normalize_openai_base_url(base_url)
+    kwargs = {
+        "model": model,
+        "base_url": openai_base,
+        "api_key": api_key,
+        "max_tokens": max_tokens,
+        "timeout": timeout,
+        "max_retries": max_retries,
+    }
+    if supports_temp:
+        kwargs["temperature"] = temperature
+    if _should_use_responses_api(model, openai_base):
+        kwargs["use_responses_api"] = True
+
+    return ChatOpenAI(**kwargs)

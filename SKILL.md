@@ -1,6 +1,6 @@
 ---
 name: "TeamClaw"
-description: "A multi-agent orchestration platform with visual workflow (OASIS). Create and configure agents (OpenClaw/external API), orchestrate them into Teams, design workflows via visual canvas. Supports Team conversations, scheduled tasks, Telegram/QQ bots, and Cloudflare Tunnel for remote access."
+description: "A multi-agent orchestration platform with visual workflow (OASIS). Create and configure agents, wire them into Teams, and run local services with optional bot and tunnel integrations."
 user-invokable: true
 compatibility:
   - "deepseek"
@@ -10,7 +10,7 @@ compatibility:
   - "anthropic"
   - "ollama"
 
-argument-hint: "[REQUIRED] LLM_API_KEY, LLM_BASE_URL, LLM_MODEL. [OPTIONAL] TTS_MODEL/TTS_VOICE, OPENCLAW_*, TELEGRAM_BOT_TOKEN/QQ_APP_ID, PORT_*. [TUNNEL] PUBLIC_DOMAIN (user must explicitly request). Agent MUST NOT auto-download or start tunnel."
+argument-hint: "[REQUIRED] LLM_API_KEY, LLM_BASE_URL. [MODEL] If LLM_MODEL is not provided, print all available models only, let the caller or agent decide, then run configure LLM_MODEL <model>. [OPTIONAL] TTS_MODEL/TTS_VOICE, OPENCLAW_*, TELEGRAM_BOT_TOKEN/QQ_APP_ID, PORT_*. [TUNNEL] PUBLIC_DOMAIN only when the user explicitly asks for public access."
 
 metadata:
   version: "1.0.2"
@@ -33,268 +33,146 @@ metadata:
 
 # TeamClaw
 
-## 是什么
+## Purpose
 
-TeamClaw 是一个**多 Agent 编排平台**，核心概念：
+Use this skill to install, configure, and run TeamClaw locally.
 
-### Team（团队）
+For non-install background material, see:
 
-Team 是协作单位，由以下部分组成：
+- [docs/windows.md](./docs/windows.md)
+- [docs/cli.md](./docs/cli.md)
+- [docs/overview.md](./docs/overview.md)
 
-| 组件 | 说明 |
-|------|------|
-| **成员（Agent）** | 执行任务的实体，包括： |
-| └─ 内置 Agent | TeamClaw 内置的轻量级 Agent（文件管理、指令执行、社交媒体） |
-| └─ OpenClaw Agent | 外部 OpenClaw 平台的 Agent |
-| └─ 外部 API Agent | 任意外部 API 服务（如 GPT-4 API） |
-| **自定义 Expert** | 人设，通过 prompt 定义身份、性格、能力 |
-| **工作流** | 定义成员之间的协作方式（串行、并行、选择、循环） |
+## Agent Rules
 
-> **公共 vs 私有**：
-> - **公共 Agent/Expert**: 在非team状态可用，可以加入team后，在team中使用
-> - **私有 Agent/Expert**：仅当前 Team 可用
-> - **公共工作流**：只能使用公共 Agent/Expert
-> - **私有工作流**：仅当前 Team 可用，只能使用已经加入team的Agent
+1. Install and configure TeamClaw first. Do not spend time on unrelated feature explanations unless the user asks.
+2. Ask for `LLM_API_KEY` and `LLM_BASE_URL` before starting services if they are not already configured.
+3. Do not create a password user unless the user explicitly wants password-based login.
+4. Do not install or configure OpenClaw unless the user explicitly asks for it.
+5. Do not start Cloudflare Tunnel unless the user explicitly asks for public access.
+6. On Windows, prefer the PowerShell flow. Use WSL only if the user prefers it or native Windows tooling is unsuitable.
+7. If the user did not specify `LLM_MODEL`, do not auto-select and do not ask the user to choose one first.
+8. When `LLM_MODEL` is missing, print all available models only, let the caller or agent read the output and decide, then run `configure LLM_MODEL <model>`.
 
-### 核心能力
+## Standard Install Flow
 
-1. **可视化编排团队 Agent**
-   - 将 OpenClaw Agent、TeamClaw 内置 Agent 或任意外部 API Agent 编排为"团队"
-   - 通过 Web UI 画布（OASIS）拖拽添加专家，设置协作关系
-   - **Expert（专家）**：人设，是特殊的 prompt，定义 Agent 的角色和能力
-   - **Agent（智能体）**：具有工具、技能和提示词的实体，可执行具体任务
-   - **OpenClaw Agent**：可以对Openclaw Agent进行配置可添加、配置可用工具、可用 Skill、提示词等
-   
-2. **团队工作流**
-   - 多AGENT并行讨论/执行，汇总结论
-   - **状态图编排**：支持串行、并行、选择、循环
-
-3. **便携分享**
-   - 将团队配置导出为压缩包，一键分享给他人
-   - 导入他人分享的团队配置，快速复用
-
-## 内置轻量级 Agent
-
-TeamClaw 内置了**轻量级 Agent**（类似简化版 OpenClaw）：
-
-| 能力 | 说明 |
-|------|------|
-| **文件管理** | 读取、写入、搜索文件 |
-| **指令执行** | 执行 shell 命令 |
-| **社交媒体** | 与 Telegram/QQ 用户沟通 |
-
-- **更轻量**：相比 OpenClaw，prompt 更简洁、工具集更精简
-- **快速启动**：无需安装 OpenClaw，开箱即用
-- **可扩展**：可添加自定义工具和 Skill
-
-| 功能 | 说明 |
-|------|------|
-| **Team 对话** | 多专家并行讨论/执行，支持 4 种专家类型 |
-| **OASIS 工作流** | 可视化画布编排，支持驱动并行 AGENT TEAM|
-| **定时任务** | APScheduler 任务调度中心 |
-| **Web UI** | 完整聊天界面，支持 127.0.0.1 免密登录 |
-| **Bot 集成** | Telegram / QQ Bot（可选配置） |
-| **公网访问** | Cloudflare Tunnel（用户明确要求时启用） |
-
----
-
-## 快速启动
+### Linux / macOS
 
 ```bash
-# 1. 安装依赖
 bash selfskill/scripts/run.sh setup
-
-# 2. 初始化配置
 bash selfskill/scripts/run.sh configure --init
 
-# 3. 配置 LLM（必填）
+# If the user already specified a model:
 bash selfskill/scripts/run.sh configure --batch \
   LLM_API_KEY=sk-xxx \
   LLM_BASE_URL=https://api.deepseek.com \
   LLM_MODEL=deepseek-chat
 
-# 4. 启动服务
+# If the user did not specify a model:
+bash selfskill/scripts/run.sh configure LLM_API_KEY sk-xxx
+bash selfskill/scripts/run.sh configure LLM_BASE_URL https://api.deepseek.com
+bash selfskill/scripts/run.sh auto-model
+# Print all available models only. Do not auto-select.
+# The caller or agent reads the output, chooses one model,
+# then runs:
+bash selfskill/scripts/run.sh configure LLM_MODEL <model>
+
 bash selfskill/scripts/run.sh start
 ```
 
-**启动后访问**：`http://127.0.0.1:51209`
+### Windows PowerShell
 
----
+```powershell
+powershell -ExecutionPolicy Bypass -File selfskill/scripts/run.ps1 setup
+powershell -ExecutionPolicy Bypass -File selfskill/scripts/run.ps1 configure --init
 
-## 用户账号
+# If the user already specified a model:
+powershell -ExecutionPolicy Bypass -File selfskill/scripts/run.ps1 configure --batch LLM_API_KEY=sk-xxx LLM_BASE_URL=https://api.deepseek.com LLM_MODEL=deepseek-chat
 
-### 免密登录（默认，首次运行推荐）
+# If the user did not specify a model:
+powershell -ExecutionPolicy Bypass -File selfskill/scripts/run.ps1 configure LLM_API_KEY sk-xxx
+powershell -ExecutionPolicy Bypass -File selfskill/scripts/run.ps1 configure LLM_BASE_URL https://api.deepseek.com
+powershell -ExecutionPolicy Bypass -File selfskill/scripts/run.ps1 auto-model
+# Print all available models only. Do not auto-select.
+# The caller or agent reads the output, chooses one model,
+# then runs:
+powershell -ExecutionPolicy Bypass -File selfskill/scripts/run.ps1 configure LLM_MODEL <model>
 
-- 无需运行 `add-user`
-- 询问用户设置用户名，或者用户可以使用默认 `admin`，"请设置您统领agent team的身份"
-- 通过 **127.0.0.1** 访问 Web UI → 自动免密登录
-- 密码登录不可用
-
-### 密码登录（可选）
-
-```bash
-bash selfskill/scripts/run.sh add-user <用户名> <密码>
+powershell -ExecutionPolicy Bypass -File selfskill/scripts/run.ps1 start
 ```
 
-> ⚠️ 执行前必须先询问用户想要的用户名和密码
+### Windows WSL Fallback
 
----
+If the user wants to reuse the shell scripts directly, follow [docs/windows.md](./docs/windows.md) and use the Linux or macOS commands inside WSL.
 
-## 高权限功能
+## Required Configuration
 
-### 新建用户
+These keys are required before first start:
 
-```bash
-bash selfskill/scripts/run.sh add-user <username> <password>
-# 可创建多个用户
-```
+| Key | Purpose | Default |
+|---|---|---|
+| `LLM_API_KEY` | Provider API key | - |
+| `LLM_BASE_URL` | OpenAI-compatible base URL | `https://api.deepseek.com` |
+| `LLM_MODEL` | Model name | `deepseek-chat` |
 
-### OpenClaw 集成（可视化工作流）
+When `LLM_MODEL` is not given by the user:
 
-```bash
-# 检测/安装 OpenClaw
-bash selfskill/scripts/run.sh check-openclaw
+1. Configure `LLM_API_KEY`
+2. Configure `LLM_BASE_URL`
+3. Run `auto-model`
+4. Print the available model list only
+5. Let the caller or agent choose one model from the output
+6. Run `configure LLM_MODEL <model>`
 
-# 如果未安装，会提示安装（需要用户确认）
-# 安装后自动配置 OPENCLAW_API_URL
-```
+## Common Operations
 
-**OASIS 画布中配置 OpenClaw Agent：**
-- 拖拽 OpenClaw 专家到画布
-- model 格式：`agent:<agent_name>:<session_name>`
-- 示例：`agent:main:default`
-
-### 配置管理
+### Linux / macOS
 
 ```bash
-# 查看配置
+bash selfskill/scripts/run.sh status
+bash selfskill/scripts/run.sh stop
 bash selfskill/scripts/run.sh configure --show
-
-# 修改配置
-bash selfskill/scripts/run.sh configure <KEY> <VALUE>
-
-# 批量设置
-bash selfskill/scripts/run.sh configure --batch KEY1=val1 KEY2=val2
+bash selfskill/scripts/run.sh add-user <username> <password>
+bash selfskill/scripts/run.sh auto-model
 ```
 
-#### 必填配置
+### Windows PowerShell
 
-首次启动必须配置：
+```powershell
+powershell -ExecutionPolicy Bypass -File selfskill/scripts/run.ps1 status
+powershell -ExecutionPolicy Bypass -File selfskill/scripts/run.ps1 stop
+powershell -ExecutionPolicy Bypass -File selfskill/scripts/run.ps1 configure --show
+powershell -ExecutionPolicy Bypass -File selfskill/scripts/run.ps1 add-user <username> <password>
+powershell -ExecutionPolicy Bypass -File selfskill/scripts/run.ps1 auto-model
+```
 
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `LLM_API_KEY` | LLM 服务商 API 密钥 | - |
-| `LLM_BASE_URL` | LLM API 基础地址 | `https://api.deepseek.com` |
-| `LLM_MODEL` | 模型名称（用户未指定时自动检测） | `deepseek-chat` |
+## Defaults and Notes
 
-#### 选填配置（需要时再配置）
+- Default local Web UI: `http://127.0.0.1:51209`
+- Local `127.0.0.1` access supports passwordless login
+- Password users are optional
+- OpenClaw, bots, and tunnel setup are optional and should be user-driven
 
-Agent 询问用户"是否需要拓展设置"后，按需配置：
+## Optional Commands
 
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| **TTS 语音** | | |
-| `TTS_MODEL` | TTS 模型 | - |
-| `TTS_VOICE` | TTS 声音 | - |
-| **OpenClaw 集成** | | |
-| `OPENCLAW_API_URL` | OpenClaw Gateway 地址 | 自动探测 |
-| `OPENCLAW_GATEWAY_TOKEN` | OpenClaw 认证令牌 | 自动探测 |
-| `OPENCLAW_SESSIONS_FILE` | OpenClaw sessions 文件路径 | 自动探测 |
-| **Bot 集成** | | |
-| `TELEGRAM_BOT_TOKEN` | Telegram Bot Token | - |
-| `TELEGRAM_ALLOWED_USERS` | Telegram 白名单用户 ID | - |
-| `QQ_APP_ID` | QQ Bot App ID | - |
-| `QQ_BOT_SECRET` | QQ Bot Secret | - |
-| `QQ_BOT_USERNAME` | QQ Bot 用户名 | - |
-| `AI_MODEL_TG` | Telegram Bot 使用的模型 | `LLM_MODEL` |
-| `AI_MODEL_QQ` | QQ Bot 使用的模型 | `LLM_MODEL` |
-| `AI_API_URL` | Bot 调用的 AI API 地址 | `LLM_BASE_URL` |
-| **高级选项** | | |
-| `PORT_AGENT` | Agent 主服务端口 | `51200` |
-| `PORT_SCHEDULER` | 定时任务端口 | `51201` |
-| `PORT_OASIS` | OASIS 工作流端口 | `51202` |
-| `PORT_FRONTEND` | Web UI 端口 | `51209` |
-| `OPENAI_STANDARD_MODE` | OpenAI 兼容模式 | `false` |
-
-> 默认值说明："自动探测"表示运行 `check-openclaw` 等命令时自动配置；"自动生成"表示首次启动时系统生成。
-
-### 启动/停止
+### OpenClaw
 
 ```bash
-bash selfskill/scripts/run.sh start     # 启动或重启（后台）
-bash selfskill/scripts/run.sh status    # 查看状态
-bash selfskill/scripts/run.sh stop      # 停止
+bash selfskill/scripts/run.sh check-openclaw
 ```
 
-### 公网隧道（用户明确要求时）
+```powershell
+powershell -ExecutionPolicy Bypass -File selfskill/scripts/run.ps1 check-openclaw
+```
+
+### Tunnel
 
 ```bash
-bash selfskill/scripts/run.sh start-tunnel   # 启动隧道
-bash selfskill/scripts/run.sh stop-tunnel    # 停止隧道
+bash selfskill/scripts/run.sh start-tunnel
+bash selfskill/scripts/run.sh stop-tunnel
 ```
 
-> ⚠️ Agent 禁止主动启动隧道，必须用户明确要求
-
----
-
-## API 概览
-
-**Base URL**: `http://127.0.0.1:51200`
-
-```bash
-# 对话接口（OpenAI 兼容）
-curl -X POST http://127.0.0.1:51200/v1/chat/completions \
-  -H "Authorization: Bearer <username>:<password>" \
-  -d '{"model":"teambot","messages":[{"role":"user","content":"Hello"}],"stream":false}'
+```powershell
+powershell -ExecutionPolicy Bypass -File selfskill/scripts/run.ps1 start-tunnel
+powershell -ExecutionPolicy Bypass -File selfskill/scripts/run.ps1 stop-tunnel
 ```
-
----
-
-## 使用方式
-
-除了 Web 可视化前端，**用户还可以直接与使用此 Skill 的 Agent 对话**，用户通过给Agent下达操作指令：
-AGENT需要使用CLI提供的工具，严格遵守用户指令。
-- 配置 LLM、创建用户、启动服务
-- 创建和管理团队、编排工作流
-- 发起讨论、执行任务
-
-注意推荐Agent使用CLI工具，而不是Web UI。
-### CLI 服务状态检查
-
-启动服务后（或排查问题时），使用 `status` 命令快速检查三个核心服务是否正常运行：
-
-```bash
-uv run scripts/cli.py status
-```
-
-输出示例：
-```
-📊 服务状态:
-
-  ✅ Agent         :51200  正常
-  ✅ OASIS         :51202  正常
-  ✅ Frontend      :51209  正常
-```
-
-- **Agent** (`:51200`) — 对话引擎，处理 chat/sessions/tools 等
-- **OASIS** (`:51202`) — 工作流引擎，处理 topics/experts/workflows
-- **Frontend** (`:51209`) — Web UI 前端，提供可视化界面
-
-> 如果某个服务显示 ❌ 不可达，可尝试 `bash selfskill/scripts/run.sh start` 重启服务。
-
-### 查看 Team 列表
-
-```bash
-uv run scripts/cli.py -u <用户名> teams list
-```
-
-### 一键查看 Team 完整信息
-
-使用 `teams info` 一次性聚合输出某个 Team 的全部信息（成员、专家、Workflows、话题）：
-
-```bash
-uv run scripts/cli.py -u <用户名> teams info --team-name <team名称>
-```
-
-> 完整命令列表和细节请参考 [docs/cli.md](./docs/cli.md)
-
