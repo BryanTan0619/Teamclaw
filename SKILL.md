@@ -42,7 +42,7 @@ TeamClaw 是一个**多 Agent 编排平台**，核心能力：
    - 通过 Web UI 画布（OASIS）拖拽添加专家，设置协作关系
    - **Expert（专家）**：人设，是特殊的 prompt，定义 Agent 的角色和能力
    - **Agent（智能体）**：具有工具、技能和提示词的实体，可执行具体任务
-   - **OpenClaw Agent**：可添加、配置可用工具、可用 Skill、提示词等
+   - **OpenClaw Agent**：可以对Openclaw Agent进行配置可添加、配置可用工具、可用 Skill、提示词等
    
 2. **团队工作流**
    - 多AGENT并行讨论/执行，汇总结论
