@@ -488,9 +488,108 @@ def cmd_topics(args):
             print("❌ 请指定 --topic-id", file=sys.stderr); return
         code, body = _req("GET", f"{OASIS_BASE}/topics/{args.topic_id}", params=params)
         if code == 200:
-            _pp(body)
+            if args.raw:
+                _pp(body)
+                return
+            # ── 美化输出 ──
+            q = body.get("question", "")
+            status = body.get("status", "?")
+            cur_r = body.get("current_round", "?")
+            max_r = body.get("max_rounds", "?")
+            is_disc = body.get("discussion", True)
+            status_icon = {"pending": "⏳", "discussing": "🔄", "concluded": "✅",
+                           "error": "❌"}.get(status, "❓")
+            print(f"{'─' * 60}")
+            print(f"📋 话题: {q}")
+            print(f"   状态: {status_icon} {status}  |  轮次: {cur_r}/{max_r}  |  {'讨论模式' if is_disc else '执行模式'}")
+            print(f"{'─' * 60}")
+
+            # 时间线（执行模式下更有意义，讨论模式也展示）
+            timeline = body.get("timeline", [])
+            if timeline:
+                print(f"\n⏱️  时间线 ({len(timeline)} 事件):")
+                for ev in timeline:
+                    elapsed = ev.get("elapsed", 0)
+                    event = ev.get("event", "")
+                    agent = ev.get("agent", "")
+                    detail = ev.get("detail", "")
+                    ev_icon = {"start": "🚀", "round": "📢", "agent_call": "⏳",
+                               "agent_done": "✅", "conclude": "🏁"}.get(event, "•")
+                    parts = [f"  {ev_icon} [{elapsed:.1f}s] {event}"]
+                    if agent:
+                        parts.append(agent)
+                    if detail:
+                        parts.append(f"— {detail}")
+                    print(" ".join(parts))
+
+            # 帖子/发言
+            posts = body.get("posts", [])
+            if posts:
+                print(f"\n💬 发言记录 ({len(posts)} 条):\n")
+                for p in posts:
+                    author = p.get("author", "?")
+                    content = p.get("content", "")
+                    reply_to = p.get("reply_to")
+                    upvotes = p.get("upvotes", 0)
+                    elapsed = p.get("elapsed", 0)
+                    pid = p.get("id", "?")
+
+                    header = f"  ┌─ #{pid} [{author}]"
+                    if reply_to:
+                        header += f" ↳回复#{reply_to}"
+                    header += f"  ({elapsed:.1f}s)"
+                    if upvotes:
+                        header += f"  👍{upvotes}"
+                    print(header)
+
+                    # 内容缩进显示，限制过长内容
+                    lines = content.strip().split("\n")
+                    max_lines = 30 if not args.full else len(lines)
+                    for i, line in enumerate(lines[:max_lines]):
+                        print(f"  │ {line}")
+                    if len(lines) > max_lines:
+                        print(f"  │ ... (共 {len(lines)} 行，用 --full 查看完整)")
+                    print(f"  └{'─' * 40}")
+            else:
+                print("\n📭 暂无发言")
+
+            # 结论
+            conclusion = body.get("conclusion")
+            if conclusion:
+                print(f"\n{'═' * 60}")
+                print(f"🏆 结论:\n")
+                print(conclusion)
+                print(f"{'═' * 60}")
         else:
             _err(code, body)
+
+    elif args.action == "watch":
+        if not args.topic_id:
+            print("❌ 请指定 --topic-id", file=sys.stderr); return
+        print(f"👀 实时跟踪话题 {args.topic_id}（Ctrl+C 退出）...\n")
+        stream_url = f"{OASIS_BASE}/topics/{args.topic_id}/stream"
+        if params:
+            stream_url += "?" + urllib.parse.urlencode(params)
+        req = urllib.request.Request(stream_url, method="GET",
+                                      headers={"Accept": "text/event-stream"})
+        try:
+            resp = urllib.request.urlopen(req, timeout=600)
+            for raw_line in resp:
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+                if line.startswith("data:"):
+                    data_str = line[5:].strip()
+                    if data_str == "[DONE]":
+                        print("\n✅ 讨论结束")
+                        break
+                    print(data_str)
+        except KeyboardInterrupt:
+            print("\n⏹️ 已停止跟踪")
+        except urllib.error.HTTPError as e:
+            print(f"❌ HTTP {e.code}: {e.reason}", file=sys.stderr)
+        except urllib.error.URLError as e:
+            print(f"❌ 连接失败: {e.reason}", file=sys.stderr)
 
     elif args.action == "cancel":
         if not args.topic_id:
@@ -520,29 +619,91 @@ def cmd_topics(args):
 
 # ── experts: OASIS 专家 ──────────────────────────────────────────────
 def cmd_experts(args):
-    """查看 OASIS 专家"""
-    code, body = _req("GET", f"{OASIS_BASE}/experts",
-                       params={"user_id": args.user})
-    if code == 200:
-        experts = body if isinstance(body, list) else body.get("experts", [body])
-        if not experts:
-            print("📭 暂无专家")
-            return
-        print(f"🧑‍🏫 专家列表 ({len(experts)} 个):\n")
-        for e in experts:
-            tag = e.get("tag", e.get("id", "?"))
-            name = e.get("name", tag)
-            role = e.get("role", "")
-            print(f"  • [{tag}] {name}")
-            if role:
-                print(f"    {role[:80]}")
+    """OASIS 专家管理"""
+    act = args.action
+
+    if act == "list":
+        params = {"user_id": args.user}
+        if args.team:
+            params["team"] = args.team
+        code, body = _req("GET", f"{OASIS_BASE}/experts", params=params)
+        if code == 200:
+            experts = body if isinstance(body, list) else body.get("experts", [body])
+            if not experts:
+                print("📭 暂无专家")
+                return
+            print(f"🧑‍🏫 专家列表 ({len(experts)} 个):\n")
+            for e in experts:
+                tag = e.get("tag", e.get("id", "?"))
+                name = e.get("name", tag)
+                role = e.get("role", "")
+                print(f"  • [{tag}] {name}")
+                if role:
+                    print(f"    {role[:80]}")
+        else:
+            _err(code, body)
+
+    elif act == "add":
+        if not args.tag:
+            print("❌ 请指定 --tag <专家标签>", file=sys.stderr); return
+        if not args.expert_name:
+            print("❌ 请指定 --expert-name <专家名称>", file=sys.stderr); return
+        data = {
+            "user_id": args.user,
+            "tag": args.tag,
+            "name": args.expert_name,
+            "team": args.team or "",
+        }
+        if args.persona:
+            data["persona"] = args.persona
+        if args.temperature is not None:
+            data["temperature"] = args.temperature
+        code, body = _req("POST", f"{OASIS_BASE}/experts/user", data=data)
+        if code == 200:
+            print(f"✅ 专家已添加: [{args.tag}] {args.expert_name}")
+            _pp(body)
+        else:
+            _err(code, body)
+
+    elif act == "update":
+        if not args.tag:
+            print("❌ 请指定 --tag <专家标签>", file=sys.stderr); return
+        data = {
+            "user_id": args.user,
+            "tag": args.tag,
+            "name": args.expert_name or "",
+            "team": args.team or "",
+        }
+        if args.persona:
+            data["persona"] = args.persona
+        if args.temperature is not None:
+            data["temperature"] = args.temperature
+        code, body = _req("PUT", f"{OASIS_BASE}/experts/user/{args.tag}", data=data)
+        if code == 200:
+            print(f"✅ 专家已更新: [{args.tag}]")
+            _pp(body)
+        else:
+            _err(code, body)
+
+    elif act == "delete":
+        if not args.tag:
+            print("❌ 请指定 --tag <专家标签>", file=sys.stderr); return
+        params = {"user_id": args.user}
+        if args.team:
+            params["team"] = args.team
+        code, body = _req("DELETE", f"{OASIS_BASE}/experts/user/{args.tag}", params=params)
+        if code == 200:
+            print(f"✅ 专家已删除: [{args.tag}]")
+        else:
+            _err(code, body)
+
     else:
-        _err(code, body)
+        print(f"❌ 未知操作: {act}", file=sys.stderr)
 
 
 # ── workflows: OASIS Workflow 管理 ────────────────────────────────────
 def cmd_workflows(args):
-    """OASIS Workflow 查看"""
+    """OASIS Workflow 管理"""
     act = args.action
 
     if act == "list":
@@ -584,6 +745,106 @@ def cmd_workflows(args):
                 print(f.read())
         else:
             print(f"❌ 文件不存在: {yaml_path}", file=sys.stderr)
+
+    elif act == "save":
+        if not args.name:
+            print("❌ 请指定 --name <workflow名称>", file=sys.stderr); return
+        # 从 --yaml-file 读取 YAML 内容，或从 --yaml 直接传入
+        yaml_content = None
+        if args.yaml_file:
+            try:
+                with open(args.yaml_file, "r", encoding="utf-8") as f:
+                    yaml_content = f.read()
+            except Exception as e:
+                print(f"❌ 读取文件失败: {e}", file=sys.stderr); return
+        elif args.yaml:
+            yaml_content = args.yaml
+        else:
+            print("❌ 请指定 --yaml <YAML内容> 或 --yaml-file <YAML文件路径>", file=sys.stderr); return
+        data = {
+            "user_id": args.user,
+            "name": args.name,
+            "schedule_yaml": yaml_content,
+            "description": args.description or "",
+            "team": args.team or "",
+        }
+        code, body = _req("POST", f"{OASIS_BASE}/workflows", data=data)
+        if code == 200:
+            print(f"✅ Workflow 已保存: {body.get('file', args.name)}")
+        else:
+            _err(code, body)
+
+    elif act == "run":
+        # 需要 question + (schedule_file 或 schedule_yaml)
+        if not args.question:
+            print("❌ 请指定 --question <讨论问题/任务>", file=sys.stderr); return
+
+        data = {
+            "user_id": args.user,
+            "question": args.question,
+            "team": args.team or "",
+        }
+        # 优先用 schedule_file（已保存的 workflow 文件名 → 转为绝对路径）
+        if args.name:
+            fname = args.name if args.name.endswith(".yaml") else args.name + ".yaml"
+            if args.team:
+                yaml_dir = os.path.join(PROJECT_ROOT, "data", "user_files", args.user,
+                                         "teams", args.team, "oasis", "yaml")
+            else:
+                yaml_dir = os.path.join(PROJECT_ROOT, "data", "user_files", args.user,
+                                         "oasis", "yaml")
+            data["schedule_file"] = os.path.join(yaml_dir, fname)
+        elif args.yaml_file:
+            try:
+                with open(args.yaml_file, "r", encoding="utf-8") as f:
+                    data["schedule_yaml"] = f.read()
+            except Exception as e:
+                print(f"❌ 读取文件失败: {e}", file=sys.stderr); return
+        elif args.yaml:
+            data["schedule_yaml"] = args.yaml
+        else:
+            print("❌ 请指定 --name <已保存的workflow名> 或 --yaml-file <YAML文件> 或 --yaml <YAML内容>", file=sys.stderr); return
+
+        if args.max_rounds:
+            data["max_rounds"] = args.max_rounds
+        if args.discussion is not None:
+            data["discussion"] = args.discussion
+        if args.early_stop:
+            data["early_stop"] = True
+
+        code, body = _req("POST", f"{OASIS_BASE}/topics", data=data, timeout=30)
+        if code == 200:
+            tid = body.get("topic_id", "?")
+            msg = body.get("message", "")
+            print(f"🚀 Workflow 已启动!")
+            print(f"   Topic ID: {tid}")
+            print(f"   {msg}")
+            print(f"\n   查看详情: uv run scripts/cli.py -u {args.user} topics show --topic-id {tid}")
+            print(f"   实时跟踪: uv run scripts/cli.py -u {args.user} topics watch --topic-id {tid}")
+            print(f"   等待结论: uv run scripts/cli.py -u {args.user} workflows conclusion --topic-id {tid}")
+        else:
+            _err(code, body)
+
+    elif act == "conclusion":
+        if not args.topic_id:
+            print("❌ 请指定 --topic-id <话题ID>", file=sys.stderr); return
+        params = {"user_id": args.user}
+        timeout = args.timeout or 300
+        params["timeout"] = timeout
+        print(f"⏳ 等待话题 {args.topic_id} 结论 (最多 {timeout}s)...")
+        code, body = _req("GET", f"{OASIS_BASE}/topics/{args.topic_id}/conclusion",
+                           params=params, timeout=timeout + 10)
+        if code == 200:
+            status = body.get("status", "")
+            if status == "running":
+                print(f"⏳ 话题仍在运行中 (第 {body.get('current_round', '?')} 轮, {body.get('total_posts', 0)} 条发言)")
+                print("   稍后再试")
+            else:
+                print(f"✅ 话题已结束 ({body.get('rounds', '?')} 轮, {body.get('total_posts', 0)} 条发言)\n")
+                print("📋 结论:")
+                print(body.get("conclusion", "(无)"))
+        else:
+            _err(code, body)
 
     else:
         print(f"❌ 未知操作: {act}", file=sys.stderr)
@@ -1458,20 +1719,40 @@ def build_parser():
     # topics
     c = sub.add_parser("topics", help="OASIS 话题管理")
     c.add_argument("action", nargs="?", default="list",
-                   choices=["list", "show", "cancel", "purge", "delete-all"],
+                   choices=["list", "show", "watch", "cancel", "purge", "delete-all"],
                    help="操作 (默认: list)")
     c.add_argument("--topic-id", help="话题 ID")
+    c.add_argument("--raw", action="store_true", help="输出原始 JSON (show 时)")
+    c.add_argument("--full", action="store_true", help="不截断长内容 (show 时)")
 
     # experts
-    sub.add_parser("experts", help="查看 OASIS 专家列表")
+    c = sub.add_parser("experts", help="OASIS 专家管理")
+    c.add_argument("action", nargs="?", default="list",
+                   choices=["list", "add", "update", "delete"],
+                   help="操作 (默认: list)")
+    c.add_argument("--tag", help="专家标签 (唯一标识)")
+    c.add_argument("--expert-name", help="专家显示名称")
+    c.add_argument("--persona", help="专家人设描述")
+    c.add_argument("--temperature", type=float, help="温度参数 (0-2)")
+    c.add_argument("--team", help="Team 名称")
 
     # workflows
-    c = sub.add_parser("workflows", help="OASIS Workflow 查看")
+    c = sub.add_parser("workflows", help="OASIS Workflow 管理")
     c.add_argument("action", nargs="?", default="list",
-                   choices=["list", "show"],
+                   choices=["list", "show", "save", "run", "conclusion"],
                    help="操作 (默认: list)")
     c.add_argument("--team", help="Team 名称")
-    c.add_argument("--name", help="Workflow 文件名 (show 时)")
+    c.add_argument("--name", help="Workflow 文件名 (show/save/run 时)")
+    c.add_argument("--yaml", help="YAML 内容 (save/run 时，直接传入)")
+    c.add_argument("--yaml-file", help="YAML 文件路径 (save/run 时，从文件读取)")
+    c.add_argument("--description", help="Workflow 描述 (save 时)")
+    c.add_argument("--question", help="讨论问题/任务 (run 时)")
+    c.add_argument("--max-rounds", type=int, help="最大轮数 (run 时, 1-20)")
+    c.add_argument("--discussion", type=lambda x: x.lower() in ("true", "1", "yes"),
+                   default=None, help="讨论模式 (run 时, true/false)")
+    c.add_argument("--early-stop", action="store_true", help="提前终止 (run 时)")
+    c.add_argument("--topic-id", help="话题 ID (conclusion 时)")
+    c.add_argument("--timeout", type=int, help="等待超时秒数 (conclusion 时, 默认 300)")
 
     # tunnel
     c = sub.add_parser("tunnel", help="Cloudflare Tunnel 管理")

@@ -485,9 +485,15 @@ uv run scripts/cli.py -u Avalon_01 teams snapshot-upload --team-name myteam --fi
 ```bash
 # 列出话题
 uv run scripts/cli.py topics
+uv run scripts/cli.py topics list
 
-# 查看话题详情
+# 查看话题详情（美化输出：时间线 + 发言记录 + 结论）
 uv run scripts/cli.py topics show --topic-id t123
+uv run scripts/cli.py topics show --topic-id t123 --full    # 不截断长发言
+uv run scripts/cli.py topics show --topic-id t123 --raw     # 输出原始 JSON
+
+# 实时跟踪讨论过程（SSE 流式输出，Ctrl+C 退出）
+uv run scripts/cli.py topics watch --topic-id t123
 
 # 取消讨论
 uv run scripts/cli.py topics cancel --topic-id t123
@@ -501,25 +507,53 @@ uv run scripts/cli.py topics delete-all
 
 | 参数 | 说明 | 必填 | 默认值 |
 |------|------|------|--------|
-| `action` | 操作 | ❌ | `list` |
-| `--topic-id` | 话题 ID | show/cancel/purge 时 ✅ | — |
+| `action` | 操作 (`list`, `show`, `watch`, `cancel`, `purge`, `delete-all`) | ❌ | `list` |
+| `--topic-id` | 话题 ID | show/watch/cancel/purge 时 ✅ | — |
+| `--raw` | 输出原始 JSON (show 时) | ❌ | `False` |
+| `--full` | 不截断长发言内容 (show 时) | ❌ | `False` |
+
+> 💡 **三种查看方式的区别：**
+> - `show` — 一次性获取话题的完整快照（时间线 + 所有发言 + 结论），适合话题结束后回顾
+> - `watch` — 实时流式输出讨论进展（连接后端 SSE），适合启动 workflow 后实时跟踪
+> - `conclusion` (在 workflows 子命令中) — 阻塞等待直到讨论结束并返回结论
 
 
 ## 19. experts
 
-**查看 OASIS 专家列表**
+**OASIS 专家管理**
 
 ```bash
-uv run scripts/cli.py experts
+# 列出专家
+uv run scripts/cli.py -u Avalon_01 experts
+uv run scripts/cli.py -u Avalon_01 experts list
+uv run scripts/cli.py -u Avalon_01 experts list --team team2
+
+# 添加自定义专家
+uv run scripts/cli.py -u Avalon_01 experts add --tag my_analyst --expert-name "数据分析师" --persona "你是资深数据分析专家"
+uv run scripts/cli.py -u Avalon_01 experts add --tag my_lawyer --expert-name "法律顾问" --persona "你是法律专家" --team team2
+
+# 更新专家
+uv run scripts/cli.py -u Avalon_01 experts update --tag my_analyst --persona "你是AI数据分析专家，擅长深度学习"
+
+# 删除专家
+uv run scripts/cli.py -u Avalon_01 experts delete --tag my_analyst
+uv run scripts/cli.py -u Avalon_01 experts delete --tag my_lawyer --team team2
 ```
 
-无额外参数。输出格式：`[tag] 名称`。
+| 参数 | 说明 | 必填 | 默认值 |
+|------|------|------|--------|
+| `action` | 操作 | ❌ | `list` |
+| `--tag` | 专家标签（唯一标识） | add/update/delete 时 ✅ | — |
+| `--expert-name` | 专家显示名称 | add 时 ✅ | — |
+| `--persona` | 专家人设描述 | ❌ | — |
+| `--temperature` | 温度参数 (0-2) | ❌ | 0.7 |
+| `--team` | Team 名称 | ❌ | — |
 
 ---
 
 ## 20. workflows
 
-**OASIS Workflow 查看**
+**OASIS Workflow 管理**
 
 ```bash
 # 列出所有 workflow
@@ -532,15 +566,55 @@ uv run scripts/cli.py -u Avalon_01 workflows list --team team2
 # 查看 YAML 内容
 uv run scripts/cli.py -u Avalon_01 workflows show --name creative_critical_workflow
 uv run scripts/cli.py -u Avalon_01 workflows show --name test2flow --team team2
+
+# 保存 workflow（从文件）
+uv run scripts/cli.py -u Avalon_01 workflows save --name my_flow --yaml-file /path/to/flow.yaml --description "我的工作流"
+uv run scripts/cli.py -u Avalon_01 workflows save --name my_flow --yaml-file /path/to/flow.yaml --team team2
+
+# 保存 workflow（直接传 YAML）
+uv run scripts/cli.py -u Avalon_01 workflows save --name quick_flow --yaml 'version: 2
+plan:
+  - id: s1
+    expert: creative#temp#1
+  - id: s2
+    expert: critical#temp#1
+edges:
+  - [s1, s2]'
+
+# 运行 workflow（使用已保存的文件名）
+uv run scripts/cli.py -u Avalon_01 workflows run --name creative_critical_workflow --question "分析AI发展趋势"
+uv run scripts/cli.py -u Avalon_01 workflows run --name test2flow --team team2 --question "讨论产品策略"
+
+# 运行 workflow（从 YAML 文件）
+uv run scripts/cli.py -u Avalon_01 workflows run --yaml-file /path/to/flow.yaml --question "分析数据"
+
+# 运行选项
+uv run scripts/cli.py -u Avalon_01 workflows run --name my_flow --question "问题" --max-rounds 10 --discussion true
+uv run scripts/cli.py -u Avalon_01 workflows run --name my_flow --question "问题" --early-stop
+
+# 获取结论（阻塞等待直到讨论结束）
+uv run scripts/cli.py -u Avalon_01 workflows conclusion --topic-id abc12345
+uv run scripts/cli.py -u Avalon_01 workflows conclusion --topic-id abc12345 --timeout 600
 ```
 
 | 参数 | 说明 | 必填 | 默认值 |
 |------|------|------|--------|
 | `action` | 操作 | ❌ | `list` |
 | `--team` | Team 名称 | ❌ | — |
-| `--name` | Workflow 文件名（可省略 `.yaml` 后缀） | show 时 ✅ | — |
+| `--name` | Workflow 文件名（可省略 `.yaml` 后缀） | show/save 时 ✅, run 时可选 | — |
+| `--yaml` | 直接传入 YAML 内容 | save/run 时可选（与 `--yaml-file` 二选一） | — |
+| `--yaml-file` | YAML 文件路径 | save/run 时可选（与 `--yaml`/`--name` 二选一） | — |
+| `--description` | Workflow 描述 | ❌ | — |
+| `--question` | 讨论问题/任务 | run 时 ✅ | — |
+| `--max-rounds` | 最大讨论轮数 (1-20) | ❌ | 5 |
+| `--discussion` | 讨论模式 (true=讨论, false=执行) | ❌ | YAML 中设定 |
+| `--early-stop` | 提前终止 | ❌ | false |
+| `--topic-id` | 话题 ID | conclusion 时 ✅ | — |
+| `--timeout` | 等待超时秒数 | ❌ | 300 |
 
 > `show` 直接读取本地 YAML 文件（`data/user_files/{user}/[teams/{team}/]oasis/yaml/{name}.yaml`），不走 HTTP。
+>
+> `run` 返回 `topic_id`，用 `conclusion` 或 `topics show` 查看结果。
 
 ---
 
