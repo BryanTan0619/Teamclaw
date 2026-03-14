@@ -10,7 +10,7 @@ compatibility:
   - "anthropic"
   - "ollama"
 
-argument-hint: "[REQUIRED] LLM_API_KEY, LLM_BASE_URL. [MODEL] If LLM_MODEL is not provided, print all available models only, let the caller or agent decide, then run configure LLM_MODEL <model>. [OPTIONAL] TTS_MODEL/TTS_VOICE, OPENCLAW_*, TELEGRAM_BOT_TOKEN/QQ_APP_ID, PORT_*. [TUNNEL] PUBLIC_DOMAIN only when the user explicitly asks for public access."
+argument-hint: "[REQUIRED] LLM_API_KEY, LLM_BASE_URL. [MODEL] If LLM_MODEL is not provided, print all available models only, let the caller or agent decide, then run configure LLM_MODEL <model>. [OPTIONAL] TTS_MODEL/TTS_VOICE, STT_MODEL/WHISPER_MODEL, OPENCLAW_*, TELEGRAM_BOT_TOKEN/QQ_APP_ID, PORT_*. [TUNNEL] PUBLIC_DOMAIN only when the user explicitly asks for public access."
 
 metadata:
   version: "1.0.2"
@@ -52,6 +52,7 @@ For non-install background material, see:
 6. On Windows, prefer the PowerShell flow. Use WSL only if the user prefers it or native Windows tooling is unsuitable.
 7. If the user did not specify `LLM_MODEL`, do not auto-select and do not ask the user to choose one first.
 8. When `LLM_MODEL` is missing, print all available models only, let the caller or agent read the output and decide, then run `configure LLM_MODEL <model>`.
+9. If the user wants OpenAI audio features, prefer `TTS_MODEL=gpt-4o-mini-tts`, `TTS_VOICE=alloy`, and `STT_MODEL=whisper-1` unless the user explicitly asks for different audio models.
 
 ## Standard Install Flow
 
@@ -135,6 +136,8 @@ bash selfskill/scripts/run.sh configure --init
 bash selfskill/scripts/run.sh start
 ```
 
+If native Windows TeamClaw is already running on the same machine, keep WSL in a separate copy with its own `.env` and ports. Do not point both installs at the same writable working tree and expect shared runtime state.
+
 ## Required Configuration
 
 These keys are required before first start:
@@ -154,6 +157,40 @@ When `LLM_MODEL` is not given by the user:
 5. Let the caller or agent choose one model from the output
 6. Run `configure LLM_MODEL <model>`
 
+## Optional Audio Configuration
+
+These are optional, but they matter if the user expects voice input or read-aloud:
+
+| Key | Purpose | Recommended for OpenAI |
+|---|---|---|
+| `TTS_MODEL` | Text-to-speech model | `gpt-4o-mini-tts` |
+| `TTS_VOICE` | Voice preset for TTS | `alloy` |
+| `STT_MODEL` | Speech-to-text model for voice input | `whisper-1` |
+
+Notes:
+
+- `Whisper` / `STT_MODEL` is for speech-to-text only. It does not power read-aloud.
+- TeamClaw read-aloud uses the `/tts` path.
+- TeamClaw voice input now tries speech-to-text first, then only falls back to raw multimodal audio if transcription is unavailable.
+
+## Startup Expectations
+
+After `start`, these four services should come up:
+
+| Service | Port variable | Default port | Purpose |
+|---|---|---|---|
+| Agent | `PORT_AGENT` | `51200` | OpenAI-compatible API and core agent backend |
+| Scheduler | `PORT_SCHEDULER` | `51201` | Scheduled task runner |
+| OASIS | `PORT_OASIS` | `51202` | Workflow and discussion engine |
+| Frontend | `PORT_FRONTEND` | `51209` | Web UI |
+
+Useful checks:
+
+- `bash selfskill/scripts/run.sh status`
+- `powershell -ExecutionPolicy Bypass -File selfskill/scripts/run.ps1 status`
+- `GET http://127.0.0.1:<PORT_AGENT>/v1/models`
+- Open the Web UI at `http://127.0.0.1:<PORT_FRONTEND>`
+
 ## Tested Installation Notes
 
 These notes come from a full Windows installation that was verified locally.
@@ -163,10 +200,14 @@ These notes come from a full Windows installation that was verified locally.
 - On Windows, all PowerShell entrypoints and all MCP subprocesses must use `.venv\Scripts\python.exe`. Relying on the system `python` command or App Execution Alias can break startup.
 - `scripts/start.ps1` should run headless. Otherwise `chatbot/setup.py` may block startup in non-interactive PowerShell runs.
 - `gpt-5.4` has been tested successfully with `LLM_BASE_URL=https://api.openai.com/` and TeamClaw's `/v1/chat/completions` endpoint.
+- OpenAI audio has also been tested successfully with `TTS_MODEL=gpt-4o-mini-tts`, `TTS_VOICE=alloy`, and `STT_MODEL=whisper-1`.
 - `auto-model` is for discovery only. It should print the model list, and the caller or agent should pick one model explicitly afterward.
 - If WSL is not already installed, the first WSL setup step requires Administrator privileges on Windows before the Linux-side TeamClaw install can be tested.
 - For WSL installs, a Linux-side copy such as `~/TeamClaw-wsl` is more reliable than running from `/mnt/c/...`.
+- If a WSL copy was created from an older Windows checkout and shell scripts fail with `$'\\r': command not found`, re-copy after the `.gitattributes` fix or convert the copied `*.sh` files to LF line endings.
 - On some WSL setups, Windows host access to TeamClaw does not forward cleanly through `127.0.0.1`. When that happens, use the WSL VM IP shown by `status` or `start`, for example `http://172.x.x.x:51209`.
+- On WSL IP access from Windows, the request is not treated as local `127.0.0.1`, so passwordless login does not apply. Create a password user first if the user needs to log in from Windows through the WSL IP.
+- If native Windows TeamClaw and WSL TeamClaw run at the same time, they must use different copies and different ports.
 
 ## Common Operations
 
@@ -194,8 +235,10 @@ powershell -ExecutionPolicy Bypass -File selfskill/scripts/run.ps1 auto-model
 
 - Default local Web UI is `http://127.0.0.1:51209`, but Windows may auto-switch it to another local port. Check `PORT_FRONTEND` in `config/.env` or run `status`.
 - Local `127.0.0.1` access supports passwordless login.
+- WSL IP access from Windows should usually use password login, not passwordless login.
 - Password users are optional.
 - OpenClaw, bots, and tunnel setup are optional and should be user-driven.
+- The frontend is the only user-facing service that should normally be opened directly in a browser. The other ports are internal service endpoints unless the user is intentionally calling APIs.
 
 ## Optional Commands
 
