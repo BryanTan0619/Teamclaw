@@ -12,7 +12,9 @@ Three expert backends:
   3. ExternalExpert — external OpenAI-compatible API (name="tag#ext#id")
      - Directly calls external endpoints (DeepSeek, GPT-4, Ollama, etc)
      - Configured per-expert via YAML: api_url, api_key, model
-     - OpenClaw CLI priority: model "agent:<name>" uses CLI first, HTTP fallback
+     - ACP persistent connection: model "agent:<name>" or "agent:<name>:<session>"
+       uses ACP long-lived subprocess connections (start/send/stop lifecycle).
+       Falls back to CLI one-shot or HTTP API if ACP unavailable.
 
 Expert pool sourcing (YAML-only, schedule_file or schedule_yaml required):
   Pool is built entirely from YAML expert names (deduplicated).
@@ -472,6 +474,21 @@ class DiscussionEngine:
             f"graph: {n_nodes} nodes, {n_edges} edges, mode={mode_label})"
         )
 
+        # ── ACP: start persistent connections for all ExternalExpert agents ──
+        acp_experts = [e for e in self.experts
+                       if isinstance(e, ExternalExpert) and e._acp_available]
+        if acp_experts:
+            print(f"[OASIS] 🔌 Starting ACP connections for {len(acp_experts)} external agent(s)...")
+            acp_results = await asyncio.gather(
+                *[e.acp_start() for e in acp_experts],
+                return_exceptions=True,
+            )
+            for e, result in zip(acp_experts, acp_results):
+                if isinstance(result, Exception):
+                    print(f"[OASIS] ⚠️ ACP start failed for {e.name}: {result}")
+            started = sum(1 for e in acp_experts if e._acp_started)
+            print(f"[OASIS] 🔌 ACP connections established: {started}/{len(acp_experts)}")
+
         try:
             max_repeats = 1
             if self.schedule.repeat:
@@ -516,6 +533,18 @@ class DiscussionEngine:
             print(f"[OASIS] ❌ Discussion error: {e}")
             self.forum.status = "error"
             self.forum.conclusion = f"讨论过程中出现错误: {str(e)}"
+
+        finally:
+            # ── ACP: stop all persistent connections ──
+            acp_to_stop = [e for e in self.experts
+                           if isinstance(e, ExternalExpert) and e._acp_started]
+            if acp_to_stop:
+                print(f"[OASIS] 🔌 Stopping {len(acp_to_stop)} ACP connection(s)...")
+                await asyncio.gather(
+                    *[e.acp_stop() for e in acp_to_stop],
+                    return_exceptions=True,
+                )
+                print(f"[OASIS] 🔌 All ACP connections released.")
 
     async def _run_graph(self):
         """Execute the graph using Pregel-style super-step iteration.

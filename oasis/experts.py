@@ -46,6 +46,14 @@ import sys
 import httpx
 from langchain_core.messages import HumanMessage
 
+# ACP long-lived connection support (from acptest4)
+try:
+    from acp import PROTOCOL_VERSION, Client, connect_to_agent, text_block
+    from acp.schema import ClientCapabilities, Implementation, AgentMessageChunk
+    _ACP_AVAILABLE = True
+except ImportError:
+    _ACP_AVAILABLE = False
+
 # 确保 src/ 在 import 路径中，以便导入 llm_factory
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
 from llm_factory import create_chat_model, extract_text
@@ -810,22 +818,67 @@ class SessionExpert:
 #   To adapt OpenClaw sessions, set x-openclaw-session-key in YAML headers.
 # ======================================================================
 
+# ── ACP long-lived connection helpers (inline from acptest4.py) ──
+
+if _ACP_AVAILABLE:
+    class _SecureStreamReader(asyncio.StreamReader):
+        """Wraps subprocess stdout, only passing JSON-RPC lines (starts with '{').
+
+        CLI tools (e.g. openclaw acp) may print decorative banners or logs to
+        stdout alongside JSON-RPC messages. This filter discards non-JSON lines
+        so the ACP protocol layer only sees valid messages.
+        """
+        def __init__(self, real_reader, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._real_reader = real_reader
+
+        async def readline(self):
+            while True:
+                line = await self._real_reader.readline()
+                if not line:
+                    return b""
+                if line.strip().startswith(b'{'):
+                    return line
+                continue
+
+    class _ACPClient(Client):
+        """ACP protocol callback handler — collects streaming text chunks."""
+        def __init__(self):
+            self.chunks: list[str] = []
+
+        async def session_update(self, session_id, update, **kwargs):
+            if isinstance(update, AgentMessageChunk) and hasattr(update.content, 'text'):
+                self.chunks.append(update.content.text)
+
+        def get_and_clear_text(self) -> str:
+            text = "".join(self.chunks)
+            self.chunks = []
+            return text
+
+
 class ExternalExpert:
     """
-    Expert backed by an external OpenAI-compatible API.
+    Expert backed by an external OpenAI-compatible API or ACP long-lived connection.
 
     Unlike SessionExpert (which calls the local mini_timebot agent),
     ExternalExpert directly calls any OpenAI-compatible endpoint (DeepSeek,
     GPT-4, Moonshot, Ollama, another mini_timebot instance, etc).
 
-    **OpenClaw Agent Support**: When the ``model`` field matches the pattern
-    ``agent:<agent_name>`` (e.g. ``agent:main``), this expert is recognized
-    as an OpenClaw agent. Communication uses the **CLI** as the primary
-    method via ``openclaw agent --agent <name> --message <msg>``.
-    If the CLI is unavailable or fails, the call falls back to the
+    **ACP Agent Support (preferred)**: When the ``model`` field matches
+    ``agent:<agent_name>`` or ``agent:<agent_name>:<session>``, ACP
+    long-lived subprocess connections are used. The subprocess is started
+    once during ``acp_start()``, messages are sent via ``acp_send()``,
+    and the process is cleaned up during ``acp_stop()``. This replaces
+    the old per-call CLI invocation model with a persistent connection.
+
+    **Legacy CLI fallback**: If ACP library is unavailable, falls back to
+    ``openclaw agent --agent <name> --message <msg>`` CLI calls (one
+    subprocess per call, no persistent connection).
+
+    **HTTP API fallback**: If both ACP and CLI are unavailable, uses the
     OpenAI-compatible HTTP API (ChatCompletions endpoint).
 
-    Session management is handled entirely by OpenClaw internally —
+    Session management is handled by the ACP connection internally —
     users cannot and do not need to specify session IDs.
 
     The external service is assumed to be **stateful** (maintaining its own
@@ -835,8 +888,9 @@ class ExternalExpert:
     No local message history is accumulated.
 
     Features:
-      - OpenClaw agents: CLI priority, HTTP API fallback
-      - Non-OpenClaw externals: direct HTTP API call
+      - ACP agents: persistent long-lived connection (start/send/stop lifecycle)
+      - Legacy CLI fallback: one-shot CLI calls when ACP unavailable
+      - Non-agent externals: direct HTTP API call
       - Incremental context (first call = full, subsequent = delta only)
       - Identity injection via system prompt on first call (persona from presets)
       - Works in both discussion mode (JSON reply/vote) and execute mode
@@ -846,8 +900,11 @@ class ExternalExpert:
     non-standard fields — just standard /v1/chat/completions.
     """
 
-    # Regex to match OpenClaw agent model format: agent:<agent_name>
-    _OPENCLAW_MODEL_RE = re.compile(r"^agent:([^:]+)$")
+    # Regex to match agent model format: agent:<agent_name> or agent:<agent_name>:<session>
+    # Group 1 = agent_name, Group 2 (optional) = session suffix
+    _AGENT_MODEL_RE = re.compile(r"^agent:([^:]+)(?::(.+))?$")
+    # Keep the old alias for backward compatibility checks
+    _OPENCLAW_MODEL_RE = _AGENT_MODEL_RE
 
     # Oasis reply protocol: require agent to wrap reply with start/end tags
     _OASIS_REPLY_START = "[oasis reply start]"
@@ -894,22 +951,36 @@ class ExternalExpert:
         self.model = model
         self._extra_headers = extra_headers or {}
 
-        # Detect OpenClaw agent model pattern: agent:<agent_name>
-        m = self._OPENCLAW_MODEL_RE.match(model)
+        # Detect agent model pattern: agent:<agent_name> or agent:<agent_name>:<session>
+        m = self._AGENT_MODEL_RE.match(model)
         if m:
             self._is_openclaw_agent = True
-            # Use explicit oc_agent_name (from external_agents.json "global_name" field)
-            # if provided; otherwise fall back to the name extracted from model string.
             raw_agent_name = m.group(1)
             self._oc_agent_name = oc_agent_name or raw_agent_name
+            # Extract ACP session suffix (e.g. "agent:test2:main" → session="main")
+            self._acp_session_suffix = m.group(2) or "main"
             self._openclaw_bin = shutil.which("openclaw")
-            print(f"  [OASIS] 🦞 OpenClaw agent detected: agent={self._oc_agent_name}"
-                  f" — CLI priority"
-                  f"{', CLI available' if self._openclaw_bin else ', CLI NOT found (HTTP only)'}")
+
+            # ── ACP long-lived connection state (initialized later via acp_start) ──
+            self._acp_available = _ACP_AVAILABLE and bool(self._openclaw_bin)
+            self._acp_proc = None       # subprocess handle
+            self._acp_conn = None       # ACP connection
+            self._acp_session_id = None # ACP session_id
+            self._acp_client = None     # _ACPClient callback handler
+            self._acp_started = False   # True after successful acp_start()
+
+            method = "ACP long-lived" if self._acp_available else (
+                "CLI one-shot" if self._openclaw_bin else "HTTP only"
+            )
+            print(f"  [OASIS] 🦞 Agent detected: agent={self._oc_agent_name}"
+                  f" session={self._acp_session_suffix}"
+                  f" — {method}")
         else:
             self._is_openclaw_agent = False
             self._oc_agent_name = ""
             self._openclaw_bin = None
+            self._acp_available = False
+            self._acp_started = False
 
         # Normalize api_url: strip trailing slash, build full URL
         if api_url:
@@ -931,6 +1002,128 @@ class ExternalExpert:
             h["Authorization"] = f"Bearer {self._api_key}"
         h.update(self._extra_headers)
         return h
+
+    # ── ACP long-lived connection lifecycle ──
+
+    async def acp_start(self):
+        """Start ACP subprocess and establish persistent connection.
+
+        This should be called once during engine initialization (before any
+        participate() calls). The subprocess stays alive across multiple
+        send() calls, maintaining conversation context server-side.
+
+        Call order: acp_start() → [participate() * N] → acp_stop()
+        """
+        if not self._acp_available or not self._is_openclaw_agent:
+            return  # Not an ACP agent, nothing to do
+
+        if self._acp_started:
+            print(f"  [OASIS] ⚠️ ACP already started for {self.name}, skipping")
+            return
+
+        try:
+            # Build the ACP command: openclaw acp --session agent:<name>:<session>
+            acp_session_arg = f"agent:{self._oc_agent_name}:{self._acp_session_suffix}"
+            cmd = [self._openclaw_bin, "acp", "--session", acp_session_arg, "--no-prefix-cwd"]
+
+            print(f"  [OASIS] 🔌 Starting ACP connection for {self.name}: "
+                  f"{' '.join(cmd)}")
+
+            self._acp_proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,  # capture stderr to avoid noise
+            )
+
+            # Wrap stdout with filter that only passes JSON-RPC lines
+            safe_stdout = _SecureStreamReader(self._acp_proc.stdout)
+            self._acp_client = _ACPClient()
+            self._acp_conn = connect_to_agent(
+                self._acp_client, self._acp_proc.stdin, safe_stdout
+            )
+
+            # ACP handshake: exchange protocol version and capabilities
+            await self._acp_conn.initialize(
+                protocol_version=PROTOCOL_VERSION,
+                client_capabilities=ClientCapabilities(),
+                client_info=Implementation(
+                    name=f"oasis-expert-{self.ext_id}", version="1.0"
+                ),
+            )
+
+            # Create a new ACP session
+            session = await self._acp_conn.new_session(
+                mcp_servers=[], cwd=os.getcwd()
+            )
+            self._acp_session_id = session.session_id
+            self._acp_started = True
+
+            print(f"  [OASIS] ✅ ACP connection established for {self.name} "
+                  f"(session_id={self._acp_session_id})")
+
+        except Exception as e:
+            print(f"  [OASIS] ❌ ACP start failed for {self.name}: {e}")
+            print(f"  [OASIS] 🔄 Will fall back to CLI/HTTP for this agent")
+            self._acp_started = False
+            self._acp_available = False  # Disable ACP for this instance
+            # Clean up partial state
+            await self._acp_cleanup_proc()
+
+    async def acp_send(self, message: str) -> str:
+        """Send a message via the ACP persistent connection.
+
+        Requires acp_start() to have been called successfully.
+        Returns the agent's response text.
+        """
+        if not self._acp_started or not self._acp_conn:
+            raise RuntimeError(f"ACP not started for {self.name}")
+
+        await self._acp_conn.prompt(
+            session_id=self._acp_session_id,
+            prompt=[text_block(message)],
+        )
+        return self._acp_client.get_and_clear_text()
+
+    async def acp_stop(self):
+        """Stop the ACP subprocess and release resources.
+
+        Should be called once after all participate() calls are done
+        (typically in engine cleanup / finally block).
+        Safe to call multiple times — subsequent calls are no-ops.
+        """
+        if not self._acp_started:
+            return
+
+        print(f"  [OASIS] 🔌 Stopping ACP connection for {self.name}")
+        self._acp_started = False
+        await self._acp_cleanup_proc()
+
+    async def _acp_cleanup_proc(self):
+        """Internal helper: forcefully clean up the ACP subprocess."""
+        proc = self._acp_proc
+        if proc is None or proc.returncode is not None:
+            return
+        try:
+            # Feed EOF to break the SecureStreamReader's read loop
+            proc.stdout.feed_eof()
+            # Close stdin
+            if proc.stdin:
+                proc.stdin.close()
+            # Terminate gracefully, then force-kill if needed
+            proc.terminate()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=0.5)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+        except Exception as e:
+            print(f"  [OASIS] ⚠️ ACP cleanup error for {self.name}: {e}")
+        finally:
+            self._acp_proc = None
+            self._acp_conn = None
+            self._acp_session_id = None
+            self._acp_client = None
 
     async def _call_openclaw_cli(self, message: str, timeout: float | None = ...) -> str:
         """Call OpenClaw agent via CLI command.
@@ -1006,8 +1199,12 @@ class ExternalExpert:
     async def _call_api(self, messages: list[dict], timeout_override: float | None = ...) -> str:
         """Send messages to external API and return the assistant response text.
 
-        For OpenClaw agents: CLI priority, HTTP API fallback.
-        For non-OpenClaw externals: direct HTTP API call.
+        Priority chain for agent-type externals:
+          1. ACP persistent connection (if started) — fastest, maintains context
+          2. Legacy CLI one-shot (if ACP not available) — slower, no context
+          3. HTTP API (if CLI also unavailable) — universal fallback
+
+        For non-agent externals: direct HTTP API call (no ACP/CLI).
 
         Args:
             timeout_override: Explicit timeout value. None = no timeout;
@@ -1015,8 +1212,8 @@ class ExternalExpert:
         """
         effective_timeout = self.timeout if timeout_override is ... else timeout_override
 
-        # ── OpenClaw agents: CLI priority ──
-        if self._is_openclaw_agent and self._openclaw_bin:
+        # ── Extract the message text for ACP/CLI (they take plain text, not messages array) ──
+        if self._is_openclaw_agent:
             cli_message = ""
             for msg in reversed(messages):
                 if msg.get("role") == "user":
@@ -1024,18 +1221,33 @@ class ExternalExpert:
                     break
             if not cli_message:
                 cli_message = messages[-1].get("content", "") if messages else ""
-            try:
-                reply = await self._call_openclaw_cli(cli_message, timeout=effective_timeout)
-                print(f"  [OASIS] 🦞 CLI success for {self.name}")
-                return reply
-            except Exception as cli_err:
-                print(f"  [OASIS] ⚠️ CLI failed for {self.name}: {cli_err}")
-                print(f"  [OASIS] 🔄 Falling back to HTTP API")
-                # Fall through to HTTP API below
 
-        # ── HTTP API call (primary for non-OpenClaw, fallback for OpenClaw) ──
+            # ── Priority 1: ACP persistent connection ──
+            if self._acp_started:
+                try:
+                    reply = await self.acp_send(cli_message)
+                    print(f"  [OASIS] 🔌 ACP send success for {self.name} ({len(reply)} chars)")
+                    return reply
+                except Exception as acp_err:
+                    print(f"  [OASIS] ⚠️ ACP send failed for {self.name}: {acp_err}")
+                    print(f"  [OASIS] 🔄 Falling back to CLI/HTTP")
+                    # Don't disable ACP permanently — might be transient
+                    # Fall through to CLI/HTTP
+
+            # ── Priority 2: Legacy CLI one-shot ──
+            if self._openclaw_bin:
+                try:
+                    reply = await self._call_openclaw_cli(cli_message, timeout=effective_timeout)
+                    print(f"  [OASIS] 🦞 CLI success for {self.name}")
+                    return reply
+                except Exception as cli_err:
+                    print(f"  [OASIS] ⚠️ CLI failed for {self.name}: {cli_err}")
+                    print(f"  [OASIS] 🔄 Falling back to HTTP API")
+                    # Fall through to HTTP API below
+
+        # ── Priority 3: HTTP API call (primary for non-agent, fallback for agent) ──
         if not self._api_url:
-            raise RuntimeError(f"No api_url configured for {self.name} and CLI unavailable/failed")
+            raise RuntimeError(f"No api_url configured for {self.name} and ACP/CLI unavailable/failed")
         body = {
             "model": self.model,
             "messages": messages,
