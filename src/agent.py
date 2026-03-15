@@ -17,6 +17,8 @@ from langchain_core.runnables import RunnableConfig
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.prebuilt import ToolNode
 
+from agent_runtime_state import TaskRegistry, ThreadStateRegistry
+
 
 # --- Tools that need automatic username injection ---
 USER_INJECTED_TOOLS = {
@@ -154,18 +156,11 @@ class MiniTimeAgent:
         self._memory_ctx = None
 
         # Per-user state
-        self._active_tasks: dict[str, asyncio.Task] = {}
-        self._task_lock = asyncio.Lock()
+        self._task_registry = TaskRegistry()
         self._user_last_tool_state: dict[str, frozenset[str]] = {}
 
         # Per-thread lock: 防止 system_trigger 和用户对话并发操作同一 checkpoint
-        self._thread_locks: dict[str, asyncio.Lock] = {}
-        self._thread_locks_guard = asyncio.Lock()
-        # 记录当前持有锁的来源: thread_id → "user" | "system"
-        self._thread_busy_source: dict[str, str] = {}
-
-        # 系统触发产生的新消息计数（thread_id → count），前端可轮询
-        self._pending_system_messages: dict[str, int] = {}
+        self._thread_state_registry = ThreadStateRegistry()
 
         # 启动时一次性加载 prompt 模板
         self._prompts = self._load_prompts()
@@ -714,81 +709,55 @@ class MiniTimeAgent:
     # ------------------------------------------------------------------
     async def cancel_task(self, user_id: str):
         """Cancel the active streaming task for a user."""
-        async with self._task_lock:
-            task = self._active_tasks.get(user_id)
-            if task and not task.done():
-                task.cancel()
-                try:
-                    await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
-                except asyncio.TimeoutError:
-                    # 超时说明 task 还活着，保留引用以便再次 cancel
-                    return
-                except (asyncio.CancelledError, Exception):
-                    pass
-            # 只有 task 已结束或成功取消才移除
-            self._active_tasks.pop(user_id, None)
+        await self._task_registry.cancel(user_id)
 
     def register_task(self, user_id: str, task: asyncio.Task):
         """Register an active streaming task for a user."""
-        self._active_tasks[user_id] = task
+        self._task_registry.register(user_id, task)
 
     def unregister_task(self, user_id: str):
         """Remove a finished task from the registry."""
-        self._active_tasks.pop(user_id, None)
+        self._task_registry.unregister(user_id)
+
+    def list_active_task_keys(self, prefix: str = "") -> list[str]:
+        """Return active task keys, optionally filtered by prefix."""
+        return self._task_registry.list_keys(prefix)
 
     # ------------------------------------------------------------------
     # Thread lock: 防止同一 thread 的并发 checkpoint 操作
     # ------------------------------------------------------------------
     async def get_thread_lock(self, thread_id: str) -> asyncio.Lock:
         """获取指定 thread 的锁（懒创建）。"""
-        async with self._thread_locks_guard:
-            if thread_id not in self._thread_locks:
-                self._thread_locks[thread_id] = asyncio.Lock()
-            return self._thread_locks[thread_id]
+        return await self._thread_state_registry.get_lock(thread_id)
 
     def add_pending_system_message(self, thread_id: str):
         """标记该 thread 有新的系统触发消息。"""
-        self._pending_system_messages[thread_id] = \
-            self._pending_system_messages.get(thread_id, 0) + 1
+        self._thread_state_registry.add_pending_system_message(thread_id)
 
     def consume_pending_system_messages(self, thread_id: str) -> int:
         """消费并返回待处理的系统消息计数，归零。"""
-        count = self._pending_system_messages.pop(thread_id, 0)
-        return count
+        return self._thread_state_registry.consume_pending_system_messages(thread_id)
 
     def has_pending_system_messages(self, thread_id: str) -> bool:
         """检查是否有未读的系统触发消息。"""
-        return self._pending_system_messages.get(thread_id, 0) > 0
+        return self._thread_state_registry.has_pending_system_messages(thread_id)
 
     def is_thread_busy(self, thread_id: str) -> bool:
         """检查该 thread 的锁是否被占用（有操作进行中）。"""
-        lock = self._thread_locks.get(thread_id)
-        return lock is not None and lock.locked()
+        return self._thread_state_registry.is_thread_busy(thread_id)
 
     def set_thread_busy_source(self, thread_id: str, source: str):
         """设置当前持有锁的来源（"user" 或 "system"）。"""
-        self._thread_busy_source[thread_id] = source
+        self._thread_state_registry.set_thread_busy_source(thread_id, source)
 
     def clear_thread_busy_source(self, thread_id: str):
         """清除锁来源记录。"""
-        self._thread_busy_source.pop(thread_id, None)
+        self._thread_state_registry.clear_thread_busy_source(thread_id)
 
     def get_thread_busy_source(self, thread_id: str) -> str:
         """返回锁来源: "user"、"system"、或 "" (未占用)。"""
-        if not self.is_thread_busy(thread_id):
-            return ""
-        return self._thread_busy_source.get(thread_id, "unknown")
+        return self._thread_state_registry.get_thread_busy_source(thread_id)
 
     def get_all_thread_status(self, prefix: str) -> dict[str, dict]:
         """返回指定前缀下所有已知 thread 的状态。"""
-        result = {}
-        for thread_id, lock in self._thread_locks.items():
-            if not thread_id.startswith(prefix):
-                continue
-            busy = lock.locked()
-            result[thread_id] = {
-                "busy": busy,
-                "source": self._thread_busy_source.get(thread_id, "") if busy else "",
-                "pending_system": self._pending_system_messages.get(thread_id, 0),
-            }
-        return result
+        return self._thread_state_registry.get_all_thread_status(prefix)
