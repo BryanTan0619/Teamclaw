@@ -183,6 +183,9 @@ switch ($Command) {
         if (Wait-HttpEndpoint -Url "http://127.0.0.1:$agentPort/v1/models") {
             Write-Host "Service is ready."
             Write-Host "Web UI: http://127.0.0.1:$frontendPort"
+            Write-Host ""
+            Write-Host "==================================================="
+            Invoke-TeamClawPython -Arguments @("scripts\cli.py", "status") | Out-Null
             exit 0
         }
 
@@ -195,6 +198,9 @@ switch ($Command) {
 
         Write-Host "Service is still starting. Check status or logs if it does not become ready soon."
         Write-Host "Web UI (when ready): http://127.0.0.1:$frontendPort"
+        Write-Host ""
+        Write-Host "==================================================="
+        Invoke-TeamClawPython -Arguments @("scripts\cli.py", "status") | Out-Null
         exit 0
     }
 
