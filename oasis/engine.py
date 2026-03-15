@@ -661,11 +661,13 @@ class DiscussionEngine:
                         if p.author in node_author_names:
                             selector_output = p.content
                             break
-                    # Parse [oasis reply choose N]
+                    # Parse [oasis reply choose N] — take the LAST occurrence
+                    # because the agent's reasoning may contain multiple
+                    # [oasis choose ...] mentions before settling on a final answer.
                     print(f"  [OASIS] 🔍 Selector '{nid}' raw output (first 200 chars): {selector_output[:200]!r}")
-                    match = _OASIS_REPLY_CHOOSE_RE.search(selector_output)
-                    if match:
-                        choice_num = int(match.group(1))
+                    all_matches = _OASIS_REPLY_CHOOSE_RE.findall(selector_output)
+                    if all_matches:
+                        choice_num = int(all_matches[-1])  # last match is the final decision
                         target = se.choices.get(choice_num, "")
                         print(f"  [OASIS] 🎯 Selector '{nid}' chose [{choice_num}] → {target or 'invalid'}")
                         self.forum.log_event("selector", detail=f"chose [{choice_num}] → {target}")
@@ -845,11 +847,13 @@ class DiscussionEngine:
                             "你需要根据上下文选择下一步操作。可选路径如下：\n"
                             + "\n".join(choices_desc) +
                             "\n\n🔴 关键格式要求（必须严格遵守）：\n"
-                            "你的回复**第一行**必须是以下格式之一（完全匹配，包含方括号）：\n"
+                            "你可以先进行分析和推理，但在回复的**最后**必须输出你的最终选择，"
+                            "格式如下（完全匹配，包含方括号）：\n"
                             "[oasis reply choose 1]\n"
                             "[oasis reply choose 2]\n"
-                            "... 等等（仅选一个）。\n"
-                            "选择标记必须放在回复的最开头第一行！后面可以跟你的分析理由。\n"
+                            "... 等等（仅选一个）。\n\n"
+                            "⚠️ 重要：如果你的思考过程中提到了多个选项，系统只会提取你回复中**最后一个** "
+                            "[oasis reply choose N] 作为最终决定。因此请确保最终选择放在回复末尾。\n"
                             "这是系统识别你选择的唯一方式，不输出此格式将导致默认选择第一项。"
                         )
                 combined_instr = (instr + selector_instr) if instr else selector_instr
