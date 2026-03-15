@@ -653,7 +653,10 @@
                 <label class="agent-meta-label">Name</label>
                 <input type="text" id="agent-meta-name" class="agent-meta-input" placeholder="(None)">
                 <label class="agent-meta-label">Tools</label>
-                <input type="text" id="agent-meta-tools" class="agent-meta-input" placeholder="(None) e.g. tool1,tool2 / all / none">
+                <div id="agent-meta-tools-container" style="max-height:150px;overflow-y:auto;border:1px solid #d1d5db;border-radius:8px;padding:8px;display:flex;flex-wrap:wrap;gap:6px;">
+                    <span style="color:#9ca3af;font-size:12px;">Loading tools...</span>
+                </div>
+                <input type="hidden" id="agent-meta-tools">
                 <label class="agent-meta-label">Tag</label>
                 <select id="agent-meta-tag" class="agent-meta-input">
                     <option value="">(None)</option>

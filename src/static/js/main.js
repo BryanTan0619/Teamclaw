@@ -1404,7 +1404,35 @@ async function openAgentMetaModal(mode, sessionId, existingMeta) {
     document.getElementById('agent-meta-modal-title').textContent =
         mode === 'edit' ? '✏️ Edit Agent Settings' : '🤖 New Agent Settings';
     document.getElementById('agent-meta-name').value = (existingMeta && existingMeta.name) || '';
-    document.getElementById('agent-meta-tools').value = (existingMeta && existingMeta.tools) || '';
+
+    // ── Populate tools checkbox list ──
+    const toolsContainer = document.getElementById('agent-meta-tools-container');
+    // Determine which tools are currently enabled for this agent
+    const existingTools = (existingMeta && existingMeta.tools) || null;
+    let enabledToolNames = null; // null = all
+    if (existingTools && typeof existingTools === 'object' && !Array.isArray(existingTools)) {
+        enabledToolNames = new Set(Object.keys(existingTools).filter(k => existingTools[k] === true));
+    } else if (typeof existingTools === 'string' && existingTools === 'none') {
+        enabledToolNames = new Set();
+    }
+    // allTools comes from loadTools() global
+    if (allTools.length > 0) {
+        toolsContainer.innerHTML = `
+            <div style="width:100%;display:flex;gap:6px;margin-bottom:4px;">
+                <button type="button" onclick="_agentMetaToolsSelectAll(true)" style="font-size:10px;padding:2px 8px;border:1px solid #d1d5db;border-radius:4px;background:#f0fdf4;color:#16a34a;cursor:pointer;">全选</button>
+                <button type="button" onclick="_agentMetaToolsSelectAll(false)" style="font-size:10px;padding:2px 8px;border:1px solid #d1d5db;border-radius:4px;background:#fef2f2;color:#dc2626;cursor:pointer;">全不选</button>
+            </div>` +
+            allTools.map(t => {
+                const checked = (enabledToolNames === null || enabledToolNames.has(t.name)) ? 'checked' : '';
+                return `<label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;padding:3px 6px;border:1px solid #e5e7eb;border-radius:5px;cursor:pointer;background:#f9fafb;white-space:nowrap;" title="${escapeHtml(t.description || '')}">
+                    <input type="checkbox" class="agent-meta-tool-cb" value="${escapeHtml(t.name)}" ${checked} style="margin:0;">
+                    ${escapeHtml(t.name)}
+                </label>`;
+            }).join('');
+    } else {
+        toolsContainer.innerHTML = '<span style="color:#9ca3af;font-size:12px;">无可用工具（请先登录加载工具列表）</span>';
+    }
+
     // Populate tag select options from experts list
     const tagSelect = document.getElementById('agent-meta-tag');
     const currentTag = (existingMeta && existingMeta.tag) || '';
@@ -1423,6 +1451,10 @@ async function openAgentMetaModal(mode, sessionId, existingMeta) {
     return new Promise(resolve => { _agentMetaCallback = resolve; });
 }
 
+function _agentMetaToolsSelectAll(selectAll) {
+    document.querySelectorAll('.agent-meta-tool-cb').forEach(cb => { cb.checked = selectAll; });
+}
+
 function closeAgentMetaModal() {
     document.getElementById('agent-meta-modal').style.display = 'none';
     if (_agentMetaCallback) { _agentMetaCallback(null); _agentMetaCallback = null; }
@@ -1430,14 +1462,24 @@ function closeAgentMetaModal() {
 
 function _collectAgentMeta() {
     const name = document.getElementById('agent-meta-name').value.trim() || null;
-    let tools = document.getElementById('agent-meta-tools').value.trim() || null;
     const tag = document.getElementById('agent-meta-tag').value.trim() || null;
-    // Parse tools: if comma-separated, split to object
-    if (tools && tools !== 'all' && tools !== 'none') {
-        const obj = {};
-        tools.split(',').map(t => t.trim()).filter(Boolean).forEach(t => obj[t] = true);
-        tools = obj;
+
+    // Collect tools from checkboxes
+    const checkboxes = document.querySelectorAll('.agent-meta-tool-cb');
+    let tools = null;
+    if (checkboxes.length > 0) {
+        const checkedNames = [];
+        checkboxes.forEach(cb => { if (cb.checked) checkedNames.push(cb.value); });
+        if (checkedNames.length === allTools.length) {
+            // All selected → don't set tools (= no restriction)
+            tools = null;
+        } else {
+            const obj = {};
+            checkedNames.forEach(t => obj[t] = true);
+            tools = obj;
+        }
     }
+
     const meta = {};
     if (name !== null) meta.name = name;
     if (tools !== null) meta.tools = tools;
@@ -4777,6 +4819,15 @@ function showAddTeamMemberModal() {
                             <option value="">(无标签)</option>
                         </select>
                     </label>
+                    <label style="font-size:11px;font-weight:600;color:#374151;">工具 (Tools)
+                        <div style="display:flex;gap:4px;margin:4px 0;">
+                            <button type="button" onclick="document.querySelectorAll('.add-oasis-tool-cb').forEach(c=>c.checked=true)" style="font-size:10px;padding:2px 8px;border:1px solid #d1d5db;border-radius:4px;background:#f0fdf4;color:#16a34a;cursor:pointer;">全选</button>
+                            <button type="button" onclick="document.querySelectorAll('.add-oasis-tool-cb').forEach(c=>c.checked=false)" style="font-size:10px;padding:2px 8px;border:1px solid #d1d5db;border-radius:4px;background:#fef2f2;color:#dc2626;cursor:pointer;">全不选</button>
+                        </div>
+                        <div id="add-oasis-tools-container" style="max-height:120px;overflow-y:auto;border:1px solid #d1d5db;border-radius:6px;padding:6px;display:flex;flex-wrap:wrap;gap:4px;margin-top:2px;">
+                            <span style="color:#9ca3af;font-size:11px;">加载中...</span>
+                        </div>
+                    </label>
                     <div id="add-oasis-drop-zone" style="border:2px dashed #d1d5db;border-radius:8px;padding:12px;text-align:center;font-size:11px;color:#9ca3af;cursor:default;transition:all .15s;">
                         📦 拖入专家设置标签
                     </div>
@@ -4796,6 +4847,19 @@ function showAddTeamMemberModal() {
                     </label>
                     <label style="font-size:11px;font-weight:600;color:#374151;">Global Name
                         <input id="add-ext-global-name" type="text" placeholder="输入Global Name" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;margin-top:2px;">
+                    </label>
+                    <label style="font-size:11px;font-weight:600;color:#374151;">标签 (Tag)
+                        <div style="display:flex;gap:4px;margin-top:2px;">
+                            <select id="add-ext-tag-select" onchange="document.getElementById('add-ext-tag-custom').value=this.value" style="flex:1;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;background:white;">
+                                <option value="">(无标签)</option>
+                                <option value="codex">codex</option>
+                                <option value="claude-code">claude-code</option>
+                                <option value="gemini-cli">gemini-cli</option>
+                                <option value="aider">aider</option>
+                                <option value="custom">自定义...</option>
+                            </select>
+                            <input id="add-ext-tag-custom" type="text" placeholder="或输入自定义tag" style="flex:1;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;">
+                        </div>
                     </label>
                     <label style="font-size:11px;color:#9ca3af;margin-bottom:2px;margin-top:8px;display:block;">API URL *</label>
                     <input id="add-ext-url" type="text" placeholder="https://api.example.com/v1" style="font-family:monospace;font-size:12px;width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;">
@@ -4868,6 +4932,19 @@ function showAddTeamMemberModal() {
             if (oasisTagSelect) oasisTagSelect.innerHTML = options;
         } catch (e) {
             console.warn('Failed to load expert tags', e);
+        }
+
+        // Populate tools checkboxes for Oasis Agent
+        const toolsContainer = document.getElementById('add-oasis-tools-container');
+        if (toolsContainer && allTools.length > 0) {
+            toolsContainer.innerHTML = allTools.map(t =>
+                `<label style="display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:2px 5px;border:1px solid #e5e7eb;border-radius:4px;cursor:pointer;background:#f9fafb;white-space:nowrap;" title="${escapeHtml(t.description || '')}">
+                    <input type="checkbox" class="add-oasis-tool-cb" value="${escapeHtml(t.name)}" checked style="margin:0;">
+                    ${escapeHtml(t.name)}
+                </label>`
+            ).join('');
+        } else if (toolsContainer) {
+            toolsContainer.innerHTML = '<span style="color:#9ca3af;font-size:11px;">无可用工具</span>';
         }
     })();
     
@@ -5005,21 +5082,35 @@ async function addOasisMember() {
         alert('请输入Agent名称');
         return;
     }
+
+    // Collect tools from checkboxes
+    const toolCbs = document.querySelectorAll('.add-oasis-tool-cb');
+    let tools = null;
+    if (toolCbs.length > 0) {
+        const checked = [];
+        toolCbs.forEach(cb => { if (cb.checked) checked.push(cb.value); });
+        if (checked.length < allTools.length) {
+            // Not all selected → build whitelist object
+            const obj = {};
+            checked.forEach(t => obj[t] = true);
+            tools = obj;
+        }
+        // If all selected → tools stays null (no restriction)
+    }
     
     // Generate automatic session ID (UUID format)
     const session = 'oc_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
     
     try {
         const url = `/internal_agents?team=${encodeURIComponent(currentGroupId)}`;
+        const meta = { name: name, tag: tag || '' };
+        if (tools !== null) meta.tools = tools;
         const resp = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 session: session,
-                meta: {
-                    name: name,
-                    tag: tag || ''
-                }
+                meta: meta
             })
         });
         
@@ -5044,6 +5135,11 @@ async function addExternalMember() {
     const apiKey = document.getElementById('add-ext-key').value.trim();
     const model = document.getElementById('add-ext-model').value.trim();
     const headersStr = document.getElementById('add-ext-headers').value.trim();
+
+    // Collect tag: custom input takes priority, then select
+    const tagCustom = document.getElementById('add-ext-tag-custom').value.trim();
+    const tagSelect = document.getElementById('add-ext-tag-select').value;
+    const tag = tagCustom || (tagSelect !== 'custom' ? tagSelect : '');
     
     if (!name || !globalName) {
         alert('请输入名称和Global Name');
@@ -5072,6 +5168,7 @@ async function addExternalMember() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 name: name,
+                tag: tag,
                 global_name: globalName,
                 api_url: apiUrl,
                 api_key: apiKey,

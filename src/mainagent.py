@@ -1275,6 +1275,70 @@ def _format_tool_calls_for_openai(ai_msg: AIMessage, external_names: set[str]) -
     return external_calls or None
 
 
+# ------------------------------------------------------------------
+# Internal-agent tool whitelist lookup
+# ------------------------------------------------------------------
+
+def _get_agent_tool_whitelist(session_id: str) -> set[str] | None:
+    """根据 session_id 在所有 internal_agents.json 中查找匹配的 agent，
+    如果该 agent 配置了 tools 白名单，返回允许的工具名集合。
+
+    查找范围：
+      1. 公共目录: data/user_files/internalagent/internal_agents.json
+      2. 所有用户的 team 目录: data/user_files/*/teams/*/internal_agents.json
+
+    Returns:
+      set[str] — 白名单集合（只包含值为 true 的 key）
+      None     — 未找到匹配 agent 或该 agent 未配置 tools（不限制）
+    """
+    if not session_id or session_id == "default":
+        return None
+
+    user_files_dir = os.path.join(root_dir, "data", "user_files")
+    if not os.path.isdir(user_files_dir):
+        return None
+
+    # 收集所有可能的 internal_agents.json 路径
+    ia_files = []
+    # 公共目录
+    public_ia = os.path.join(user_files_dir, "internalagent", "internal_agents.json")
+    if os.path.isfile(public_ia):
+        ia_files.append(public_ia)
+    # 所有用户 team 目录
+    for user_dir_name in os.listdir(user_files_dir):
+        teams_dir = os.path.join(user_files_dir, user_dir_name, "teams")
+        if not os.path.isdir(teams_dir):
+            continue
+        for team_name in os.listdir(teams_dir):
+            team_ia = os.path.join(teams_dir, team_name, "internal_agents.json")
+            if os.path.isfile(team_ia):
+                ia_files.append(team_ia)
+
+    # 遍历所有文件，按 session 匹配
+    for ia_file in ia_files:
+        try:
+            with open(ia_file, "r", encoding="utf-8") as f:
+                agents_list = json.load(f)
+            if not isinstance(agents_list, list):
+                continue
+            for agent_entry in agents_list:
+                if not isinstance(agent_entry, dict):
+                    continue
+                if agent_entry.get("session") != session_id:
+                    continue
+                # 找到匹配的 agent
+                tools_cfg = agent_entry.get("tools")
+                if not isinstance(tools_cfg, dict) or not tools_cfg:
+                    return None  # 该 agent 无 tools 配置 → 不限制
+                # 提取值为 true 的 key
+                whitelist = {k for k, v in tools_cfg.items() if v is True}
+                return whitelist if whitelist else set()  # 空 set = 全部禁用
+        except (json.JSONDecodeError, OSError):
+            continue
+
+    return None  # 未找到匹配 → 不限制
+
+
 def _auth_openai_request(req: ChatCompletionRequest, auth_header: str | None):
     """从 OpenAI 请求中提取认证信息并验证。
     支持格式：
@@ -1410,10 +1474,23 @@ async def openai_chat_completions(
                 human_msg.content = f"[来自调度方的指令]\n{sys_text}\n\n---\n{human_msg.content}"
         input_messages = [human_msg]
 
+    # ── Agent tool whitelist enforcement ──
+    # 根据 session_id 查找 internal_agents.json 中配置的 tools 白名单，
+    # 与调用方传入的 enabled_tools 取交集（调用方不能越权突破白名单）。
+    agent_whitelist = _get_agent_tool_whitelist(session_id)
+    effective_enabled = req.enabled_tools
+    if agent_whitelist is not None:
+        if effective_enabled is None:
+            # 调用方未限制 → 直接用白名单
+            effective_enabled = list(agent_whitelist)
+        else:
+            # 调用方有自己的限制 → 取交集
+            effective_enabled = [t for t in effective_enabled if t in agent_whitelist]
+
     user_input = {
         "messages": input_messages,
         "trigger_source": "user",
-        "enabled_tools": req.enabled_tools,
+        "enabled_tools": effective_enabled,
         "user_id": user_id,
         "session_id": session_id,
         "external_tools": req.tools,

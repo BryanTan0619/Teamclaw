@@ -1704,7 +1704,10 @@ def cmd_teams(args):
 
 # ── status: 服务状态 ─────────────────────────────────────────────────
 def cmd_status(args):
-    """检查各服务状态"""
+    """检查各服务状态、外部平台、API Key 等"""
+    import shutil
+
+    # ── 1. 服务在线状态 ──
     services = [
         ("Agent",     f"http://127.0.0.1:{PORT_AGENT}/v1/models"),
         ("OASIS",     f"http://127.0.0.1:{PORT_OASIS}/experts"),
@@ -1718,6 +1721,113 @@ def cmd_status(args):
                 print(f"  ✅ {name:12s}  :{url.split(':')[2].split('/')[0]}  正常")
         except Exception:
             print(f"  ❌ {name:12s}  :{url.split(':')[2].split('/')[0]}  不可达")
+
+    # ── 2. LLM API Key 状态 ──
+    print(f"\n{'─' * 50}")
+    print("🔑 API Key 配置:\n")
+    env_path = os.path.join(PROJECT_ROOT, "config", ".env")
+    env_vars = {}
+    if os.path.isfile(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                env_vars[k.strip()] = v.strip()
+
+    llm_api_key = env_vars.get("LLM_API_KEY", "")
+    llm_base_url = env_vars.get("LLM_BASE_URL", "")
+    llm_model = env_vars.get("LLM_MODEL", "")
+    api_key_ok = bool(llm_api_key and llm_api_key != "your_api_key_here")
+
+    if api_key_ok:
+        masked = llm_api_key[:8] + "..." + llm_api_key[-4:] if len(llm_api_key) > 12 else "***"
+        print(f"  ✅ LLM_API_KEY    = {masked}")
+    else:
+        print(f"  ❌ LLM_API_KEY    = (未设置)")
+    print(f"     LLM_BASE_URL  = {llm_base_url or '(未设置)'}")
+    print(f"     LLM_MODEL     = {llm_model or '(未设置)'}")
+
+    if api_key_ok:
+        print(f"\n  🤖 Teamclaw 轻量级 Agent：可用")
+        print(f"     基于 LLM API 驱动的内置 Agent，无需额外安装")
+        print(f"     支持: 对话 / 工具调用 / 多轮推理")
+    else:
+        print(f"\n  ⚠️  API Key 未配置 → 内部 Agent (Internal Agent) 无法使用！")
+        print(f"     Teamclaw 轻量级 Agent 需要 LLM_API_KEY 才能工作")
+        print(f"     请运行 bash scripts/setup_apikey.sh 或手动编辑 config/.env")
+        print(f"\n  💡 即使没有 API Key，仍可使用以下外部 Agent 平台:")
+        print(f"     openclaw / codex / claude (claude-code) / gemini (gemini-cli) / aider")
+
+    # ── 3. 外部 Agent 平台检测 ──
+    print(f"\n{'─' * 50}")
+    print("🖥️  外部 Agent 平台:\n")
+
+    platforms = [
+        ("openclaw", "OpenClaw",     "本地多 Agent 编排平台"),
+        ("codex",    "Codex CLI",    "OpenAI Codex 命令行 Agent"),
+        ("claude",   "Claude Code",  "Anthropic Claude 命令行 Agent"),
+        ("gemini",   "Gemini CLI",   "Google Gemini 命令行 Agent"),
+        ("aider",    "Aider",        "AI Pair Programming 工具"),
+    ]
+
+    available_platforms = []
+    for cmd, display_name, description in platforms:
+        path = shutil.which(cmd)
+        if path:
+            # 尝试获取版本
+            version_str = ""
+            try:
+                result = subprocess.run(
+                    [cmd, "--version"], capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    ver_line = result.stdout.strip().splitlines()[0]
+                    # 截取版本号（最多 60 字符）
+                    version_str = f"  ({ver_line[:60]})"
+                elif result.stderr.strip():
+                    ver_line = result.stderr.strip().splitlines()[0]
+                    version_str = f"  ({ver_line[:60]})"
+            except Exception:
+                pass
+            print(f"  ✅ {display_name:14s} — {description}{version_str}")
+            print(f"     路径: {path}")
+            available_platforms.append(display_name)
+        else:
+            print(f"  ❌ {display_name:14s} — 未安装 (命令 '{cmd}' 不在 PATH 中)")
+
+    # OpenClaw 额外检查: API URL 和 sessions file
+    openclaw_api_url = env_vars.get("OPENCLAW_API_URL", "")
+    openclaw_sessions = env_vars.get("OPENCLAW_SESSIONS_FILE", "")
+    if shutil.which("openclaw"):
+        if openclaw_api_url:
+            print(f"\n  📡 OpenClaw API URL     = {openclaw_api_url}")
+        if openclaw_sessions:
+            exists = os.path.isfile(openclaw_sessions)
+            icon = "✅" if exists else "⚠️"
+            print(f"  {icon} OpenClaw Sessions   = {openclaw_sessions}")
+
+    # ── 4. 综合总结 ──
+    print(f"\n{'─' * 50}")
+    print("📋 总结:\n")
+
+    if api_key_ok:
+        print(f"  ✅ Teamclaw 轻量级 Agent：可用 (内置，基于 LLM API)")
+        print(f"     模型: {llm_model}  Base URL: {llm_base_url}")
+    else:
+        print(f"  ❌ Teamclaw 轻量级 Agent：不可用 (未配置 LLM_API_KEY)")
+        print(f"     → 设置方法: bash scripts/setup_apikey.sh")
+
+    if available_platforms:
+        print(f"\n  ✅ 可用的外部 Agent 平台 ({len(available_platforms)} 个):")
+        for p in available_platforms:
+            print(f"     • {p}")
+    else:
+        print(f"\n  ⚠️  未检测到任何外部 Agent 平台")
+        print(f"     可安装: openclaw / codex / claude (claude-code) / gemini (gemini-cli) / aider")
+
+    print()
 
 
 # ═══════════════════════════════════════════════════════════════════════

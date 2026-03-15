@@ -105,6 +105,9 @@ case "${1:-help}" in
             if curl -sf "http://127.0.0.1:$AGENT_PORT/v1/models" > /dev/null 2>&1; then
                 echo " ✅"
                 print_wsl_access_hint
+                echo ""
+                echo "═══════════════════════════════════════════════════"
+                python scripts/cli.py status
                 exit 0
             fi
             echo -n "."
@@ -112,6 +115,9 @@ case "${1:-help}" in
         done
         echo ""
         echo "⚠️  服务可能仍在启动中，请查看日志确认"
+        echo ""
+        echo "═══════════════════════════════════════════════════"
+        python scripts/cli.py status
         exit 0
         ;;
 
