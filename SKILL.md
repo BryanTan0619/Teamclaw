@@ -106,8 +106,13 @@ Use this skill to install, configure, and run TeamClaw locally.
 
 For non-install background material, see:
 
-- [docs/cli.md](./docs/cli.md)
-- [docs/overview.md](./docs/overview.md)
+- [docs/overview.md](./docs/overview.md) — Platform overview and architecture
+- [docs/cli.md](./docs/cli.md) — Complete CLI command reference
+- [docs/build_team.md](./docs/build_team.md) — How to build and configure a Team (members, experts, JSON files)
+- [docs/create_workflow.md](./docs/create_workflow.md) — How to create OASIS workflow YAML (graph format, expert types, examples)
+- [docs/example_team.md](./docs/example_team.md) — Example Team file structure and contents
+- [docs/openclaw-commands.md](./docs/openclaw-commands.md) — OpenClaw integration commands
+- [docs/ports.md](./docs/ports.md) — Port configuration and management
 
 ## Agent Rules
 
