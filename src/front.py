@@ -1890,7 +1890,7 @@ def proxy_tunnel_stop():
 #   (session is a per-entry field, analogous to global_name in external_agents.json)
 # Paths:
 #   - Team mode: data/user_files/{user_id}/teams/{team}/internal_agents.json
-#   - Public mode: data/user_files/internalagent/internal_agents.json
+#   - Non-team mode: data/user_files/{user_id}/internal_agents.json
 # Frontend expects: {"agents": [{"session": "sid", "meta": {...}}, ...]}
 # ------------------------------------------------------------------
 
@@ -1898,7 +1898,7 @@ def _ia_dir(user_id: str, team: str = "") -> str:
     """Return the directory path for internal agent files."""
     if team:
         return os.path.join(root_dir, "data", "user_files", user_id, "teams", team)
-    return os.path.join(root_dir, "data", "user_files", "internalagent")
+    return os.path.join(root_dir, "data", "user_files", user_id)
 
 
 def _ia_path(user_id: str, team: str = "") -> str:

@@ -31,15 +31,23 @@ def get_all_cron_jobs() -> Tuple[List[Dict], Optional[str]]:
         # Extract and clean job data
         clean_jobs = []
         for job in jobs:
+            schedule = job.get("schedule", {})
+            schedule_kind = schedule.get("kind")  # "cron" | "at" | "every"
+            
             clean_job = {
                 "name": job.get("name"),
                 "agentId": job.get("agentId"),
-                "sessionKey": job.get("sessionKey"),
-                "cron": job.get("schedule", {}).get("expr"),
-                "tz": job.get("schedule", {}).get("tz"),
+                "scheduleKind": schedule_kind,
+                "cron": schedule.get("expr") if schedule_kind == "cron" else None,
+                "tz": schedule.get("tz") if schedule_kind == "cron" else None,
+                "at": schedule.get("at") if schedule_kind == "at" else None,
+                "every": schedule.get("interval") if schedule_kind == "every" else None,
                 "message": job.get("payload", {}).get("message"),
                 "session": job.get("sessionTarget"),
-                "mode": job.get("delivery", {}).get("mode")
+                "mode": job.get("delivery", {}).get("mode"),
+                "enabled": job.get("enabled", True),
+                "deleteAfterRun": job.get("deleteAfterRun", False),
+                "wakeMode": job.get("wakeMode", "now"),
             }
             clean_jobs.append(clean_job)
         
@@ -77,28 +85,51 @@ def restore_cron_job(job: Dict, target_agent: Optional[str] = None) -> Tuple[boo
     Restore a single cron job.
     
     Args:
-        job: Job dictionary with fields: name, agentId, sessionKey, cron, tz, message, session, mode
+        job: Job dictionary with fields from get_all_cron_jobs output.
+             Supports scheduleKind: "cron", "at", "every".
         target_agent: Optional new agent name (if different from original)
         
     Returns:
         Tuple of (success, error_message)
     """
     try:
-        agent_name = target_agent or job.get("agentId", "")
+        agent_name = target_agent or job.get("agentId") or ""
+        schedule_kind = job.get("scheduleKind", "cron")
         
         cmd = [
             "openclaw", "cron", "add",
-            "--name", job.get("name", ""),
+            "--name", job.get("name") or "",
             "--agent", agent_name,
-            "--session-key", job.get("sessionKey", ""),
             "--session", job.get("session") or "isolated",
-            "--tz", job.get("tz") or "Asia/Shanghai",
-            "--cron", job.get("cron", ""),
-            "--message", job.get("message", "")
+            "--message", job.get("message") or "",
+            "--wake", job.get("wakeMode") or "now",
         ]
         
-        # Handle no-deliver mode
-        if job.get("mode") == "none":
+        # Schedule type specific flags
+        if schedule_kind == "cron":
+            cmd.extend(["--cron", job.get("cron") or ""])
+            tz = job.get("tz")
+            if tz:
+                cmd.extend(["--tz", tz])
+        elif schedule_kind == "at":
+            cmd.extend(["--at", job.get("at") or ""])
+        elif schedule_kind == "every":
+            cmd.extend(["--every", job.get("every") or ""])
+        else:
+            return False, f"Unknown schedule kind: {schedule_kind}"
+        
+        # Optional flags
+        if job.get("deleteAfterRun"):
+            cmd.append("--delete-after-run")
+        
+        if not job.get("enabled", True):
+            cmd.append("--disabled")
+        
+        # Handle delivery mode
+        mode = job.get("mode")
+        if mode == "announce":
+            cmd.append("--announce")
+        elif mode == "none" or mode is None:
             cmd.append("--no-deliver")
         
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)

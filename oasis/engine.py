@@ -72,10 +72,6 @@ from oasis.scheduler import (
 # Maximum total node executions across all super-steps (safety limit)
 _MAX_TOTAL_NODE_EXECS = 500
 
-# Path to internal agent config directory (default, non-team)
-_INTERNAL_AGENT_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)), "data", "user_files", "internalagent"
-)
 # Project root for team-scoped paths
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 
@@ -120,7 +116,7 @@ def _load_internal_agents(user_id: str, team: str = "") -> list[dict]:
     If team is specified, load from the team-scoped path:
       data/user_files/{user_id}/teams/{team}/internal_agents.json
     Otherwise load from:
-      data/user_files/internalagent/internal_agents.json
+      data/user_files/{user_id}/internal_agents.json
 
     Returns list of {"session": "<id>", "meta": {"name": ..., "tag": ...}} entries.
     Returns [] if file missing or unreadable.
@@ -128,7 +124,7 @@ def _load_internal_agents(user_id: str, team: str = "") -> list[dict]:
     if team:
         base_dir = os.path.join(_PROJECT_ROOT, "data", "user_files", user_id, "teams", team)
     else:
-        base_dir = _INTERNAL_AGENT_DIR
+        base_dir = os.path.join(_PROJECT_ROOT, "data", "user_files", user_id)
 
     ia_path = os.path.join(base_dir, "internal_agents.json")
 

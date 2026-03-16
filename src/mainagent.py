@@ -1284,7 +1284,7 @@ def _get_agent_tool_whitelist(session_id: str) -> set[str] | None:
     如果该 agent 配置了 tools 白名单，返回允许的工具名集合。
 
     查找范围：
-      1. 公共目录: data/user_files/internalagent/internal_agents.json
+      1. 所有用户的非 team 目录: data/user_files/*/internal_agents.json
       2. 所有用户的 team 目录: data/user_files/*/teams/*/internal_agents.json
 
     Returns:
@@ -1300,12 +1300,12 @@ def _get_agent_tool_whitelist(session_id: str) -> set[str] | None:
 
     # 收集所有可能的 internal_agents.json 路径
     ia_files = []
-    # 公共目录
-    public_ia = os.path.join(user_files_dir, "internalagent", "internal_agents.json")
-    if os.path.isfile(public_ia):
-        ia_files.append(public_ia)
-    # 所有用户 team 目录
+    # 所有用户目录（非 team 模式）
     for user_dir_name in os.listdir(user_files_dir):
+        user_ia = os.path.join(user_files_dir, user_dir_name, "internal_agents.json")
+        if os.path.isfile(user_ia):
+            ia_files.append(user_ia)
+        # 所有用户 team 目录
         teams_dir = os.path.join(user_files_dir, user_dir_name, "teams")
         if not os.path.isdir(teams_dir):
             continue
