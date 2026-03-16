@@ -95,12 +95,95 @@ uv run scripts/cli.py internal-agents delete \
 
 ### 3.2 OpenClaw Agent
 
-**Add an OpenClaw Agent:**
-```bash
-uv run scripts/cli.py openclaw add --data '{"name":"<BOT_NAME>"}'
+OpenClaw Agent 是运行在 OASIS 后端的真实 Agent 实例。添加到 Team 需要**先确保后端有真实配置**，再同步到 JSON。
+
+#### 完整流程
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  CLI 添加/设置 OpenClaw Agent 的完整流程                                  │
+└─────────────────────────────────────────────────────────────────────────┘
+
+  ┌──────────────────┐
+  │ 1. 查找或创建后端 │  ← 先确定后端有真实配置
+  └────────┬─────────┘
+           │
+           ├─ A. 查找已有: `openclaw sessions`
+           │           GET /sessions/openclaw
+           │           查看已运行的 OpenClaw Agent
+           │
+           └─ B. 新建: `openclaw sessions add`
+              POST /sessions/openclaw/add
+
+  ┌──────────────────┐
+  │ 2. (可选)修改配置 │
+  └────────┬─────────┘
+           │
+           └─ `openclaw update-config`
+              POST /sessions/openclaw/update-config
+
+  ┌──────────────────┐
+  │ 3. 添加到 JSON   │  ← 骨架信息 (name, tag, global_name)
+  └────────┬─────────┘
+           │
+           └─ `teams add-ext-member`
+              POST /teams/{team}/members/external
+
+  ┌──────────────────┐
+  │ 4. 导出完整配置  │  ← 关键！将后端配置同步到 JSON
+  └────────┬─────────┘
+           │
+           └─ `openclaw snapshot export`
+              POST /team_openclaw_snapshot/export
 ```
 
+#### 步骤详解
+
+**Step 1: 查找已有的 OpenClaw Agent**
+```bash
+uv run scripts/cli.py -u <username> openclaw sessions
+```
+
+**Step 2: 或创建新的 OpenClaw Agent**
+```bash
+uv run scripts/cli.py -u <username> openclaw sessions add \
+  --agent-name <AGENT_NAME> \
+  --backend openai \
+  --model gpt-4o \
+  --api-key <API_KEY> \
+  --base-url <BASE_URL>
+```
+
+**Step 3: (可选) 修改 Agent 配置**
+```bash
+uv run scripts/cli.py -u <username> openclaw update-config \
+  --agent-name <AGENT_NAME> \
+  --config '{"temperature": 0.7}'
+```
+
+**Step 4: 添加到 Team JSON（骨架信息）**
+```bash
+uv run scripts/cli.py -u <username> teams add-ext-member \
+  --team-name <TEAM_NAME> \
+  --data '{
+    "name": "<AGENT_NAME>",
+    "tag": "openclaw",
+    "global_name": "<GLOBAL_NAME>"
+  }'
+```
+
+**Step 5: 导出后端完整配置到 JSON**
+```bash
+uv run scripts/cli.py -u <username> openclaw snapshot export \
+  --team-name <TEAM_NAME> \
+  --name <AGENT_NAME>
+```
+
+> ⚠️ **关键区别**: CLI 需要用户显式执行 `export` 才能将后端配置同步到 JSON；而前端在关闭 Agent 配置面板时会自动执行 sync_all。
+
 ### 3.3 External Agent (API-based)
+
+如需对 OpenClaw 外部 Agent 进行深度控制（如修改温度参数、限制工具权限等），请先阅读 **[openclaw-commands.md](openclaw-commands.md)** 文档中的"六、外部 Agent 配置"章节。
 
 **Add an External Member:**
 ```bash

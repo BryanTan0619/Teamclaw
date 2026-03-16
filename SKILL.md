@@ -143,15 +143,47 @@ uv run scripts/cli.py internal-agents add \
   --team <TEAM> \
   --data '{"session":"xyz","meta":{"name":"Name","tag":"creative"}}'
 
-# Add external agent (OpenClaw)
-uv run scripts/cli.py teams add-ext-member \
-  --team-name <TEAM> \
-  --data '{"name":"agent","global_name":"agent","tag":"openclaw"}'
-
 # List teams/members
 uv run scripts/cli.py teams list
 uv run scripts/cli.py teams members --team-name <TEAM>
 ```
+
+**OpenClaw Agent (3-Step Workflow, 4th Optional):**
+
+```bash
+# Step 1: Find existing or create new OpenClaw Agent
+uv run scripts/cli.py -u <user> openclaw sessions                    # List existing
+uv run scripts/cli.py -u <user> openclaw sessions add \
+  --agent-name <name> --backend openai --model gpt-4o ...           # Create new
+
+# Step 2: (Optional) Update config / identity — modify runtime settings
+# Similar to OpenClaw "identity" tab settings (temperature, system_prompt, etc.)
+# See `docs/openclaw-commands.md` and `docs/cli.md` → 13.openclaw for full details
+uv run scripts/cli.py -u <user> openclaw update-config \
+  --agent-name <name> --config '{"temperature":0.7, "system_prompt":"..."}'
+
+# Step 3: Add skeleton to team JSON
+uv run scripts/cli.py -u <user> teams add-ext-member \
+  --team-name <TEAM> --data '{"name":"<name>","tag":"openclaw","global_name":"<name>"}'
+
+# Step 4: (Optional) Export backend config to JSON — see system prompt for details
+# ⚡ Only needed if you need full config in JSON (for download/backup/inspection)
+# ⚠️ High latency operation — calls backend OpenClaw APIs to fetch full config
+# Does NOT affect runtime — only updates JSON snapshot for read/download purposes
+uv run scripts/cli.py -u <user> openclaw snapshot export \
+  --team-name <TEAM> --name <name>
+```
+
+> 📖 **Required Reading:**
+> - `docs/openclaw-commands.md` — OpenClaw integration details
+> - `docs/cli.md` → Section 13 (openclaw) — Full command reference
+> - `docs/build_team.md` → Section 3.2 — When to use `export`
+>
+> 🔧 **Key CLI Tools:**
+> - `openclaw sessions` — List/create backend sessions
+> - `openclaw update-config` — Modify runtime config (identity-like settings)
+> - `teams add-ext-member` — Add agent skeleton to team JSON
+> - `openclaw snapshot export` — (Optional) Sync backend → JSON for snapshot/download
 
 **Create & Run Workflow:**
 ```bash
