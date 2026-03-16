@@ -380,7 +380,76 @@ The `set_oasis_workflow` MCP tool can be used to save a workflow:
 
 ---
 
-## 9. Tips & Best Practices
+## 9. Execute and Monitor Workflow via CLI
+
+After saving a workflow, you can execute and monitor it using the CLI:
+
+### 9.1 List Workflows
+
+```bash
+# List all workflows for a team
+uv run scripts/cli.py workflows list --team <TEAM_NAME>
+```
+
+### 9.2 Run a Workflow
+
+```bash
+# Execute a workflow with a question
+uv run scripts/cli.py workflows run \
+  --team <TEAM_NAME> \
+  --name <WORKFLOW_NAME> \
+  --question "your question or task here" \
+  --max-rounds <MAX_ROUNDS> \
+  [--output <OUTPUT_FILE>]
+```
+
+**Parameters:**
+- `--question`: The input question or task for the workflow (e.g., "需要开发一个新的系统...")
+- `--max-rounds`: Maximum number of discussion rounds (e.g., `--max-rounds 10`)
+- `--output`: Optional output file to save the conversation JSON
+
+**Example:**
+```bash
+uv run scripts/cli.py workflows run \
+  --team DevTeam \
+  --name product_review_pipeline \
+  --question "需要开发一个在线客服系统" \
+  --max-rounds 10
+```
+
+The command will print the topic ID (e.g., `Topic created: 94a2cbb7`) for tracking.
+
+### 9.3 Monitor Workflow Status
+
+```bash
+# View workflow execution details and current status
+uv run scripts/cli.py topics show --topic-id <TOPIC_ID>
+```
+
+### 9.4 Get Final Conclusion
+
+```bash
+# Wait for workflow completion and retrieve final summary
+uv run scripts/cli.py workflows conclusion \
+  --topic-id <TOPIC_ID> \
+  [--output <OUTPUT_FILE>] \
+  [--timeout <SECONDS>]
+```
+
+**Parameters:**
+- `--topic-id`: The topic ID returned when running the workflow
+- `--timeout`: Maximum time to wait for completion in seconds (default: 120)
+
+### 9.5 Live Watch
+
+```bash
+# Real-time monitoring of workflow progress
+uv run scripts/cli.py topics watch --topic-id <TOPIC_ID>
+```
+
+---
+
+## 10. Tips & Best Practices
 
 1. **Maximize parallelism**: Nodes with no dependency relationship should run concurrently. Use fan-in/fan-out patterns.
 2. **Use selectors for loops**: When you need iterative refinement, use a selector node to decide whether to loop or exit.

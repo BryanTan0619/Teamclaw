@@ -114,6 +114,84 @@ For non-install background material, see:
 - [docs/openclaw-commands.md](./docs/openclaw-commands.md) — OpenClaw integration commands
 - [docs/ports.md](./docs/ports.md) — Port configuration and management
 
+### Team Folder Path
+
+TeamClaw stores all team-specific data in the following path structure:
+
+```
+data/user_files/{user_id}/teams/{team_name}/
+├── internal_agents.json      # Internal agent (expert) session bindings
+├── external_agents.json      # External agent definitions (OpenClaw, custom API)
+├── oasis_experts.json        # Expert persona definitions
+└── oasis/yaml/
+    └── *.yaml                # Team workflow YAML files
+```
+
+**Public/Personal workflows:** `data/user_files/{user_id}/oasis/yaml/*.yaml`
+
+> 💡 **Agent Tip:** You can directly read and modify these files instead of using CLI commands.
+
+### Quick Reference (CLI)
+
+**Build Team:**
+```bash
+# Create team
+uv run scripts/cli.py teams create --team-name <TEAM>
+
+# Add internal agent (uses public expert by tag)
+uv run scripts/cli.py internal-agents add \
+  --team <TEAM> \
+  --data '{"session":"xyz","meta":{"name":"Name","tag":"creative"}}'
+
+# Add external agent (OpenClaw)
+uv run scripts/cli.py teams add-ext-member \
+  --team-name <TEAM> \
+  --data '{"name":"agent","global_name":"agent","tag":"openclaw"}'
+
+# List teams/members
+uv run scripts/cli.py teams list
+uv run scripts/cli.py teams members --team-name <TEAM>
+```
+
+**Create & Run Workflow:**
+```bash
+# List workflows
+uv run scripts/cli.py workflows list --team <TEAM>
+
+# Save workflow from YAML
+uv run scripts/cli.py oasis set-workflow \
+  --team <TEAM> --name <WORKFLOW> --file <PATH_TO_YAML>
+
+# Run workflow
+uv run scripts/cli.py workflows run \
+  --team <TEAM> --name <WORKFLOW> \
+  --question "Task description" --max-rounds 10
+
+# Monitor progress (get topic ID from run output)
+uv run scripts/cli.py topics show --topic-id <ID>
+uv run scripts/cli.py workflows conclusion --topic-id <ID>
+```
+
+**⚡ Recommended: Non-blocking status check**
+
+After running a workflow, use `topics show` to check progress **without blocking**:
+
+```bash
+# Instant snapshot — returns immediately, works for running/completed/error topics
+uv run scripts/cli.py topics show --topic-id <ID>
+```
+
+This returns the current status (`discussing` / `concluded` / `error`), round progress, timeline events, and all posts produced so far. It is safe to call repeatedly as a lightweight poll.
+
+| Method | Blocking | Use Case |
+|--------|----------|----------|
+| `topics show --topic-id <ID>` | ❌ No | **Recommended.** Quick status snapshot, works at any stage |
+| `topics list` | ❌ No | Overview of all topics with status summary |
+| `topics watch --topic-id <ID>` | ✅ Yes (SSE) | Real-time streaming, stays connected until done |
+| `workflows conclusion --topic-id <ID>` | ⚠️ Semi | Polls until conclusion is ready, then returns |
+
+> 💡 **Agent Tip:** Prefer `topics show` for programmatic checks. Avoid `topics watch` (blocking SSE) and `workflows conclusion` (polling wait) when you need non-blocking behavior.
+
 ## Agent Rules
 
 1. Install and configure TeamClaw first. Do not spend time on unrelated feature explanations unless the user asks.
@@ -125,6 +203,21 @@ For non-install background material, see:
 7. If the user did not specify `LLM_MODEL`, do not auto-select and do not ask the user to choose one first.
 8. When `LLM_MODEL` is missing, print all available models only, let the caller or agent read the output and decide, then run `configure LLM_MODEL <model>`.
 9. If the user wants OpenAI audio features, prefer `TTS_MODEL=gpt-4o-mini-tts`, `TTS_VOICE=alloy`, and `STT_MODEL=whisper-1` unless the user explicitly asks for different audio models.
+
+### Required Reading (Docs)
+
+Before performing operations, read the corresponding docs:
+
+| Operation | Read This Doc | Purpose |
+|-----------|---------------|---------|
+| Create/Modify Team | `docs/build_team.md` | How to configure members, experts, JSON files |
+| Create/Modify Workflow | `docs/create_workflow.md` | OASIS YAML format, expert types, graph structure |
+| Use CLI Commands | `docs/cli.md` | Complete CLI reference and examples |
+| Understand Team Structure | `docs/example_team.md` | Example file structure and contents |
+| OpenClaw Integration | `docs/openclaw-commands.md` | OpenClaw agent commands |
+| Port Management | `docs/ports.md` | Port configuration and conflicts |
+
+> **Docs Location:** `/root/.openclaw/workspace/skills/Teamclaw/docs/`
 
 ## Standard Install Flow
 
