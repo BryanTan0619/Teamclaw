@@ -4,6 +4,9 @@ import os
 import json
 from dotenv import load_dotenv
 from cron_utils import get_agent_cron_jobs, restore_cron_jobs
+from front_group_routes import register_group_routes
+from front_oasis_routes import register_oasis_routes
+from front_session_routes import register_session_routes
 
 # 加载 .env 配置
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -44,6 +47,17 @@ INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "")
 # OASIS Forum proxy
 PORT_OASIS = int(os.getenv("PORT_OASIS", "51202"))
 OASIS_BASE_URL = f"http://127.0.0.1:{PORT_OASIS}"
+register_group_routes(app, port_agent=PORT_AGENT, internal_token=INTERNAL_TOKEN)
+register_oasis_routes(app, oasis_base_url=OASIS_BASE_URL)
+register_session_routes(
+    app,
+    port_agent=PORT_AGENT,
+    internal_token=INTERNAL_TOKEN,
+    local_sessions_url=LOCAL_SESSIONS_URL,
+    local_session_history_url=LOCAL_SESSION_HISTORY_URL,
+    local_session_status_url=LOCAL_SESSION_STATUS_URL,
+    local_delete_session_url=LOCAL_DELETE_SESSION_URL,
+)
 
 # --- users.json 检查（密码登录时验证用户是否存在）---
 USERS_PATH = os.path.join(root_dir, "config", "users.json")
@@ -479,36 +493,6 @@ def proxy_restart_services():
         return jsonify({"status": "success", "message": "重启信号已发送"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
-@app.route("/proxy_sessions")
-def proxy_sessions():
-    """代理获取用户会话列表"""
-    user_id = session.get("user_id", "")
-    try:
-        r = requests.post(LOCAL_SESSIONS_URL, json={"user_id": user_id}, headers=_internal_auth_headers(), timeout=15)
-        return jsonify(r.json()), r.status_code
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/proxy_sessions_status")
-def proxy_sessions_status():
-    """代理获取用户所有 session 的忙碌状态"""
-    user_id = session.get("user_id", "")
-    try:
-        r = requests.post(
-            f"http://127.0.0.1:{PORT_AGENT}/sessions_status",
-            json={"user_id": user_id},
-            headers=_internal_auth_headers(),
-            timeout=5,
-        )
-        return jsonify(r.json()), r.status_code
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-
 
 
 @app.route("/proxy_openclaw_sessions")
@@ -1116,309 +1100,6 @@ def team_openclaw_snapshot_restore_all():
         "errors": errors,
         "message": f"Restored {restored}/{len(openclaw_entries)} agents from team snapshot",
     })
-
-
-@app.route("/proxy_session_history", methods=["POST"])
-def proxy_session_history():
-    """代理获取指定会话的历史消息"""
-    user_id = session.get("user_id", "")
-    sid = request.json.get("session_id", "")
-    try:
-        r = requests.post(LOCAL_SESSION_HISTORY_URL, json={
-            "user_id": user_id, "session_id": sid
-        }, headers=_internal_auth_headers(), timeout=15)
-        return jsonify(r.json()), r.status_code
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/proxy_session_status", methods=["POST"])
-def proxy_session_status():
-    """代理检查会话是否有系统触发的新消息"""
-    user_id = session.get("user_id", "")
-    sid = request.json.get("session_id", "") if request.is_json else ""
-    try:
-        r = requests.post(LOCAL_SESSION_STATUS_URL, json={
-            "user_id": user_id, "session_id": sid
-        }, headers=_internal_auth_headers(), timeout=5)
-        return jsonify(r.json()), r.status_code
-    except Exception:
-        return jsonify({"has_new_messages": False}), 200
-
-
-@app.route("/proxy_delete_session", methods=["POST"])
-def proxy_delete_session():
-    """代理删除会话请求到后端 Agent"""
-    user_id = session.get("user_id", "")
-    sid = request.json.get("session_id", "") if request.is_json else ""
-    try:
-        r = requests.post(LOCAL_DELETE_SESSION_URL, json={
-            "user_id": user_id, "session_id": sid
-        }, headers=_internal_auth_headers(), timeout=15)
-        return jsonify(r.json()), r.status_code
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-# ===== Group Chat Proxy Routes =====
-
-def _group_auth_headers():
-    """构造群聊API的Authorization header（使用 INTERNAL_TOKEN）"""
-    user_id = session.get("user_id", "")
-    return user_id, {
-        "Authorization": f"Bearer {INTERNAL_TOKEN}:{user_id}",
-    }
-
-
-@app.route("/proxy_groups", methods=["GET"])
-def proxy_list_groups():
-    """代理列出用户群聊"""
-    uid, headers = _group_auth_headers()
-    try:
-        r = requests.get(f"http://127.0.0.1:{PORT_AGENT}/groups", headers=headers, timeout=10)
-        return jsonify(r.json()), r.status_code
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/proxy_groups", methods=["POST"])
-def proxy_create_group():
-    """代理创建群聊"""
-    uid, headers = _group_auth_headers()
-    try:
-        headers["Content-Type"] = "application/json"
-        r = requests.post(f"http://127.0.0.1:{PORT_AGENT}/groups", json=request.get_json(silent=True), headers=headers, timeout=10)
-        return jsonify(r.json()), r.status_code
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/proxy_groups/<group_id>", methods=["GET"])
-def proxy_get_group(group_id):
-    """代理获取群聊详情"""
-    uid, headers = _group_auth_headers()
-    try:
-        r = requests.get(f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}", headers=headers, timeout=10)
-        return jsonify(r.json()), r.status_code
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/proxy_groups/<group_id>", methods=["PUT"])
-def proxy_update_group(group_id):
-    """代理更新群聊"""
-    uid, headers = _group_auth_headers()
-    try:
-        headers["Content-Type"] = "application/json"
-        r = requests.put(f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}", json=request.get_json(silent=True), headers=headers, timeout=10)
-        return jsonify(r.json()), r.status_code
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/proxy_groups/<group_id>", methods=["DELETE"])
-def proxy_delete_group(group_id):
-    """代理删除群聊"""
-    uid, headers = _group_auth_headers()
-    try:
-        r = requests.delete(f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}", headers=headers, timeout=10)
-        return jsonify(r.json()), r.status_code
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/proxy_groups/<group_id>/messages", methods=["GET"])
-def proxy_group_messages(group_id):
-    """代理获取群聊消息（支持增量 after_id）"""
-    uid, headers = _group_auth_headers()
-    try:
-        after_id = request.args.get("after_id", "0")
-        r = requests.get(
-            f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}/messages",
-            params={"after_id": after_id},
-            headers=headers, timeout=10,
-        )
-        return jsonify(r.json()), r.status_code
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/proxy_groups/<group_id>/messages", methods=["POST"])
-def proxy_post_group_message(group_id):
-    """代理发送群聊消息"""
-    uid, headers = _group_auth_headers()
-    try:
-        headers["Content-Type"] = "application/json"
-        r = requests.post(
-            f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}/messages",
-            json=request.get_json(silent=True),
-            headers=headers, timeout=10,
-        )
-        return jsonify(r.json()), r.status_code
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/proxy_groups/<group_id>/mute", methods=["POST"])
-def proxy_mute_group(group_id):
-    """代理静音群聊"""
-    uid, headers = _group_auth_headers()
-    try:
-        r = requests.post(
-            f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}/mute",
-            headers=headers, timeout=10,
-        )
-        return jsonify(r.json()), r.status_code
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/proxy_groups/<group_id>/unmute", methods=["POST"])
-def proxy_unmute_group(group_id):
-    """代理取消静音群聊"""
-    uid, headers = _group_auth_headers()
-    try:
-        r = requests.post(
-            f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}/unmute",
-            headers=headers, timeout=10,
-        )
-        return jsonify(r.json()), r.status_code
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/proxy_groups/<group_id>/mute_status", methods=["GET"])
-def proxy_group_mute_status(group_id):
-    """代理查询群聊静音状态"""
-    uid, headers = _group_auth_headers()
-    try:
-        r = requests.get(
-            f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}/mute_status",
-            headers=headers, timeout=10,
-        )
-        return jsonify(r.json()), r.status_code
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/proxy_groups/<group_id>/sessions", methods=["GET"])
-def proxy_group_sessions(group_id):
-    """代理获取可加入群聊的sessions"""
-    uid, headers = _group_auth_headers()
-    try:
-        r = requests.get(
-            f"http://127.0.0.1:{PORT_AGENT}/groups/{group_id}/sessions",
-            headers=headers, timeout=15,
-        )
-        return jsonify(r.json()), r.status_code
-    except Exception as e:
-        return jsonify({"sessions": [], "error": str(e)}), 500
-
-
-# ===== OASIS Proxy Routes =====
-
-@app.route("/proxy_oasis/topics")
-def proxy_oasis_topics():
-    """Proxy: list OASIS discussion topics for the logged-in user."""
-    user_id = session.get("user_id", "")
-    try:
-        print(f"[OASIS Proxy] Fetching topics from {OASIS_BASE_URL}/topics for user={user_id}")
-        r = requests.get(f"{OASIS_BASE_URL}/topics", params={"user_id": user_id}, timeout=10)
-        print(f"[OASIS Proxy] Response status: {r.status_code}, count: {len(r.json()) if r.text else 0}")
-        return jsonify(r.json()), r.status_code
-    except Exception as e:
-        print(f"[OASIS Proxy] Error fetching topics: {e}")
-        return jsonify([]), 200  # Return empty list on error
-
-
-@app.route("/proxy_oasis/topics/<topic_id>")
-def proxy_oasis_topic_detail(topic_id):
-    """Proxy: get full detail of a specific OASIS discussion."""
-    user_id = session.get("user_id", "")
-    try:
-        url = f"{OASIS_BASE_URL}/topics/{topic_id}"
-        print(f"[OASIS Proxy] Fetching topic detail from {url} for user={user_id}")
-        r = requests.get(url, params={"user_id": user_id}, timeout=10)
-        print(f"[OASIS Proxy] Detail response status: {r.status_code}")
-        return jsonify(r.json()), r.status_code
-    except Exception as e:
-        print(f"[OASIS Proxy] Error fetching topic detail: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/proxy_oasis/topics/<topic_id>/stream")
-def proxy_oasis_topic_stream(topic_id):
-    """Proxy: SSE stream for real-time OASIS discussion updates."""
-    user_id = session.get("user_id", "")
-    try:
-        r = requests.get(
-            f"{OASIS_BASE_URL}/topics/{topic_id}/stream",
-            params={"user_id": user_id},
-            stream=True, timeout=300,
-        )
-        if r.status_code != 200:
-            return jsonify({"error": f"OASIS returned {r.status_code}"}), r.status_code
-
-        def generate():
-            for line in r.iter_lines(decode_unicode=True):
-                if line:
-                    yield line + "\n\n"
-
-        return Response(
-            generate(),
-            mimetype="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/proxy_oasis/experts")
-def proxy_oasis_experts():
-    """Proxy: list all OASIS expert agents."""
-    user_id = session.get("user_id", "")
-    try:
-        r = requests.get(f"{OASIS_BASE_URL}/experts", params={"user_id": user_id}, timeout=10)
-        return jsonify(r.json()), r.status_code
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/proxy_oasis/topics/<topic_id>/cancel", methods=["POST"])
-def proxy_oasis_cancel_topic(topic_id):
-    """Proxy: force-cancel a running OASIS discussion."""
-    user_id = session.get("user_id", "")
-    try:
-        r = requests.delete(f"{OASIS_BASE_URL}/topics/{topic_id}", params={"user_id": user_id}, timeout=10)
-        return jsonify(r.json()), r.status_code
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/proxy_oasis/topics/<topic_id>/purge", methods=["POST"])
-def proxy_oasis_purge_topic(topic_id):
-    """Proxy: permanently delete an OASIS discussion record."""
-    user_id = session.get("user_id", "")
-    try:
-        r = requests.post(f"{OASIS_BASE_URL}/topics/{topic_id}/purge", params={"user_id": user_id}, timeout=10)
-        return jsonify(r.json()), r.status_code
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/proxy_oasis/topics", methods=["DELETE"])
-def proxy_oasis_purge_all_topics():
-    """Proxy: delete all OASIS topics for the current user."""
-    user_id = session.get("user_id", "")
-    try:
-        r = requests.delete(f"{OASIS_BASE_URL}/topics", params={"user_id": user_id}, timeout=30)
-        return jsonify(r.json()), r.status_code
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
 # ──────────────────────────────────────────────────────────────

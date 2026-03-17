@@ -78,6 +78,13 @@ from oasis.models import (
 )
 from oasis.forum import DiscussionForum
 from oasis.engine import DiscussionEngine
+from oasis.openclaw_cli import (
+    build_agent_detail as _build_agent_detail_helper,
+    fetch_openclaw_channels as _fetch_openclaw_channels_helper,
+    fetch_openclaw_full_config as _fetch_openclaw_full_config_helper,
+    get_openclaw_default_workspace as _get_openclaw_default_workspace_helper,
+    get_openclaw_workspace_path as _get_openclaw_workspace_path_helper,
+)
 
 # Ensure src/ is importable for helper reuse
 _src_path = os.path.join(_project_root, "src")
@@ -885,21 +892,8 @@ async def list_openclaw_agents(filter: str = Query("")):
 
 
 def _get_openclaw_default_workspace() -> str | None:
-    """Get the default agent's workspace path via ``openclaw config get agents.defaults.workspace``."""
-    if not _OPENCLAW_BIN:
-        return None
-    try:
-        result = subprocess.run(
-            [_OPENCLAW_BIN, "config", "get", "agents.defaults.workspace"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode != 0:
-            return None
-        ws = result.stdout.strip()
-        # Expand ~ in case it's returned as-is
-        return os.path.expanduser(ws) if ws else None
-    except Exception:
-        return None
+    """Get default workspace path from OpenClaw config."""
+    return _get_openclaw_default_workspace_helper(_OPENCLAW_BIN)
 
 
 @app.get("/sessions/openclaw/default-workspace")
@@ -1066,60 +1060,13 @@ _OPENCLAW_TOOL_PROFILES = {
 
 
 def _fetch_openclaw_full_config() -> dict | None:
-    """Call ``openclaw config get agents`` and return the full agents config object."""
-    if not _OPENCLAW_BIN:
-        return None
-    try:
-        result = subprocess.run(
-            [_OPENCLAW_BIN, "config", "get", "agents"],
-            capture_output=True, text=True, timeout=15,
-        )
-        if result.returncode != 0:
-            print(f"  [OASIS] ⚠️ openclaw config get agents failed: {result.stderr.strip()[:200]}")
-            return None
-        # The output may contain a banner line before the JSON
-        raw = result.stdout
-        # Find the first '{' to start of JSON
-        idx = raw.find('{')
-        if idx < 0:
-            return None
-        json_str = raw[idx:]
-        return json.loads(json_str)
-    except (json.JSONDecodeError, subprocess.TimeoutExpired, Exception) as e:
-        print(f"  [OASIS] ⚠️ openclaw config get agents parse error: {e}")
-        return None
+    """Read OpenClaw full agents config."""
+    return _fetch_openclaw_full_config_helper(_OPENCLAW_BIN)
 
 
 def _build_agent_detail(agent_cfg: dict, defaults: dict) -> dict:
-    """Build a normalized agent detail object from a config entry."""
-    agent_id = agent_cfg.get("id", "")
-    tools_cfg = agent_cfg.get("tools", {})
-    profile = tools_cfg.get("profile", "")
-    also_allow = tools_cfg.get("alsoAllow", tools_cfg.get("allow", []))
-    deny = tools_cfg.get("deny", [])
-
-    # Skills: if not set (None) or set to "null" string, means "all available"
-    skills_cfg = agent_cfg.get("skills", None)
-    if skills_cfg == "null" or skills_cfg == "":
-        skills_cfg = None
-    skills_all = not isinstance(skills_cfg, list)  # True = unrestricted
-
-    return {
-        "id": agent_id,
-        "name": agent_cfg.get("name", agent_id),
-        "workspace": agent_cfg.get("workspace", defaults.get("workspace", "")),
-        "agentDir": agent_cfg.get("agentDir", ""),
-        "is_default": agent_cfg.get("isDefault", False),
-        "model": (agent_cfg.get("model", {}) if isinstance(agent_cfg.get("model"), dict)
-                  else {"primary": agent_cfg.get("model", "")}),
-        "tools": {
-            "profile": profile,
-            "alsoAllow": also_allow if isinstance(also_allow, list) else [],
-            "deny": deny if isinstance(deny, list) else [],
-        },
-        "skills": skills_cfg if isinstance(skills_cfg, list) else [],
-        "skills_all": skills_all,
-    }
+    """Build normalized agent detail object from config entry."""
+    return _build_agent_detail_helper(agent_cfg, defaults)
 
 
 @app.get("/sessions/openclaw/agent-detail")
@@ -1344,39 +1291,8 @@ async def get_openclaw_skills_info():
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 def _get_openclaw_workspace_path():
-    """Get OpenClaw workspace path from config or default location."""
-    import os
-    import shutil
-    
-    # Try to get workspace from openclaw config
-    openclaw_bin = shutil.which("openclaw")
-    if openclaw_bin:
-        try:
-            result = subprocess.run(
-                [openclaw_bin, "config", "get", "agents.defaults.workspace"],
-                capture_output=True, text=True, timeout=10,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                for line in result.stdout.splitlines():
-                    line = line.strip()
-                    if line and os.path.sep in line:
-                        return line
-        except:
-            pass
-    
-    # Default workspace locations
-    default_paths = [
-        os.path.expanduser("~/.openclaw/workspace"),
-        os.path.expanduser("~/.moltbot/workspace"),
-        "/projects/.openclaw/workspace",
-        "/projects/.moltbot/workspace"
-    ]
-    
-    for path in default_paths:
-        if os.path.isdir(path):
-            return path
-    
-    return None
+    """Get OpenClaw workspace path from config or fallback locations."""
+    return _get_openclaw_workspace_path_helper(_OPENCLAW_BIN)
 
 
 @app.get("/sessions/openclaw/tool-groups")
@@ -1524,25 +1440,8 @@ async def update_openclaw_agent_config(req: Request):
 # ------------------------------------------------------------------
 
 def _fetch_openclaw_channels() -> dict | None:
-    """Call ``openclaw channels list --json`` and return the parsed result."""
-    if not _OPENCLAW_BIN:
-        return None
-    try:
-        result = subprocess.run(
-            [_OPENCLAW_BIN, "channels", "list", "--json"],
-            capture_output=True, text=True, timeout=15,
-        )
-        if result.returncode != 0:
-            print(f"  [OASIS] ⚠️ openclaw channels list failed: {result.stderr.strip()[:200]}")
-            return None
-        raw = result.stdout
-        idx = raw.find('{')
-        if idx < 0:
-            return None
-        return json.loads(raw[idx:])
-    except (json.JSONDecodeError, subprocess.TimeoutExpired, Exception) as e:
-        print(f"  [OASIS] ⚠️ openclaw channels parse error: {e}")
-        return None
+    """Read channels list from OpenClaw CLI."""
+    return _fetch_openclaw_channels_helper(_OPENCLAW_BIN)
 
 
 @app.get("/sessions/openclaw/channels")
