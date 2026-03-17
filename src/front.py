@@ -1,4 +1,6 @@
 from flask import Flask, render_template, request, jsonify, session, Response
+from werkzeug.middleware.proxy_fix import ProxyFix
+import hashlib
 import requests
 import os
 import json
@@ -16,7 +18,15 @@ load_dotenv(dotenv_path=os.path.join(root_dir, "config", ".env"))
 app = Flask(__name__,
             template_folder=os.path.join(current_dir, 'templates'),
             static_folder=os.path.join(current_dir, 'static'))
-app.secret_key = os.urandom(24)
+
+# 信任反向代理的 X-Forwarded-Proto / X-Forwarded-For 等头
+# 这样 Cloudflare Tunnel 转发的 HTTPS 请求会被正确识别为 HTTPS，
+# Flask 才会在 HTTP 内部连接上正确读取 Secure cookie
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
+# 基于 INTERNAL_TOKEN 生成稳定的 secret_key，避免每次重启时所有 session 失效
+_token = os.getenv("INTERNAL_TOKEN", "")
+app.secret_key = hashlib.sha256(f"teamclaw-session-{_token}".encode()).digest() if _token else os.urandom(24)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB for image uploads
 
 # --- 配置区 ---
