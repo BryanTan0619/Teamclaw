@@ -41,6 +41,14 @@
     <!-- Offline Banner -->
     <div id="offline-banner" data-i18n="offline_banner">⚠️ 网络已断开，请检查连接</div>
 
+    <!-- Page Loading Overlay (delayed show for smooth transitions) -->
+    <div id="page-loading-overlay">
+        <div class="page-loading-spinner">
+            <div class="page-loading-dots"><span></span><span></span><span></span></div>
+            <div class="page-loading-text">Loading…</div>
+        </div>
+    </div>
+
     <!-- ========== 登录页 ========== -->
     <div id="login-screen" class="min-h-screen flex items-center justify-center safe-top safe-bottom px-4" style="width:100%;height:100%;overflow:auto;">
         <div class="bg-white rounded-2xl shadow-2xl p-6 sm:p-8 w-full max-w-md border">
@@ -101,6 +109,72 @@
         <div class="chat-main h-screen flex flex-col bg-white border-x border-gray-200 shadow-2xl">
             <!-- Page Switch Tab Bar -->
             <div class="page-tab-bar">
+                <div class="hamburger-menu-wrapper">
+                    <button class="hamburger-btn" onclick="toggleHamburgerMenu()" title="Menu">
+                        <span class="hamburger-icon">☰</span>
+                    </button>
+                    <!-- Vertical slide-down panel -->
+                    <div id="hamburger-panel" class="hamburger-panel" style="display:none;">
+                        <div class="hamburger-panel-item uid-item">
+                            <span class="hamburger-item-icon">🆔</span>
+                            <span class="hamburger-item-label">UID</span>
+                            <span id="hamburger-uid" class="hamburger-uid-val"></span>
+                        </div>
+                        <div class="hamburger-panel-item uid-item">
+                            <span class="hamburger-item-icon">💬</span>
+                            <span class="hamburger-item-label">Session</span>
+                            <span id="session-display" class="hamburger-uid-val" data-i18n-title="current_session" title="当前对话号"></span>
+                        </div>
+                        <div class="hamburger-panel-divider"></div>
+                        <button class="hamburger-panel-item" onclick="toggleSessionSidebar(); closeHamburgerMenu();">
+                            <span class="hamburger-item-icon">🤖</span>
+                            <span class="hamburger-item-label" data-i18n="hmenu_agents">Agents</span>
+                        </button>
+                        <button class="hamburger-panel-item" onclick="openSettings(); closeHamburgerMenu();">
+                            <span class="hamburger-item-icon">⚙️</span>
+                            <span class="hamburger-item-label" data-i18n="hmenu_settings">Settings</span>
+                        </button>
+                        <button class="hamburger-panel-item" onclick="orchOpenClawQuickConfig(); closeHamburgerMenu();">
+                            <span class="hamburger-item-icon">🦞</span>
+                            <span class="hamburger-item-label" data-i18n="hmenu_openclaw">OpenClaw</span>
+                        </button>
+                        <button class="hamburger-panel-item" onclick="handleNewSession(); closeHamburgerMenu();">
+                            <span class="hamburger-item-icon">➕</span>
+                            <span class="hamburger-item-label" data-i18n="hmenu_new">New Chat</span>
+                        </button>
+                        <button class="hamburger-panel-item" onclick="toggleOasisMobile(); closeHamburgerMenu();">
+                            <span class="hamburger-item-icon">🏛️</span>
+                            <span class="hamburger-item-label" data-i18n="hmenu_oasis">TeamsWork</span>
+                        </button>
+                        <div class="hamburger-panel-divider"></div>
+                        <button class="hamburger-panel-item" onclick="toggleLanguage(); closeHamburgerMenu();">
+                            <span class="hamburger-item-icon">🌐</span>
+                            <span class="hamburger-item-label" data-i18n="hmenu_lang">Language</span>
+                            <span id="lang-toggle-btn" class="hamburger-badge">EN</span>
+                        </button>
+                        <div class="hamburger-panel-item uid-item" id="public-toggle-wrap">
+                            <span class="hamburger-item-icon" id="public-toggle-label">🌐</span>
+                            <span class="hamburger-item-label" data-i18n="hmenu_public">Public</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="public-toggle" onchange="handlePublicToggle(this.checked)" disabled>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="hamburger-panel-divider"></div>
+                        <button class="hamburger-panel-item hamburger-logout" onclick="handleLogout(); closeHamburgerMenu();">
+                            <span class="hamburger-item-icon">🚪</span>
+                            <span class="hamburger-item-label" data-i18n="hmenu_logout">Logout</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="tab-bar-brand">
+                    <div class="bg-blue-600 p-1 rounded-lg text-white font-bold text-sm">X</div>
+                    <div class="tab-bar-brand-text">
+                        <span class="text-xs font-bold text-gray-800 leading-tight">Teamclaw</span>
+                        <span class="text-[9px] text-green-500 flex items-center" data-i18n="encrypted">● 已加密</span>
+                    </div>
+                </div>
+                <div id="uid-display" style="display:none;"></div>
                 <div class="page-tab" id="tab-chat" onclick="switchPage('chat')" data-i18n="tab_chat">💬 Chat</div>
                 <div class="page-tab active" id="tab-group" onclick="switchPage('group')" data-i18n="tab_group">👥 Team</div>
                 <div class="page-tab" id="tab-orchestrate" onclick="switchPage('orchestrate')" data-i18n="tab_orchestrate">🤝 Workflow</div>
@@ -108,56 +182,6 @@
 
             <!-- === Chat Page === -->
             <div id="page-chat" class="chat-page hidden-page" style="display:none;">
-            <header class="p-3 sm:p-4 border-b bg-white flex justify-between items-start sm:items-center gap-2 flex-shrink-0">
-                <div class="flex items-center space-x-2 sm:space-x-3 mobile-header-top flex-shrink-0">
-                    <div class="bg-blue-600 p-1.5 sm:p-2 rounded-lg text-white font-bold text-lg sm:text-xl">X</div>
-                    <div>
-                        <h1 class="text-sm sm:text-lg font-bold text-gray-800 leading-tight">Teamclaw</h1>
-                        <p class="text-[10px] sm:text-xs text-green-500 flex items-center" data-i18n="encrypted">● 已加密</p>
-                    </div>
-                </div>
-                <div class="flex items-center space-x-1 sm:space-x-2 mobile-header-actions flex-shrink-0">
-                    <div id="uid-display" class="text-xs sm:text-sm font-mono bg-gray-100 px-2 sm:px-3 py-1 rounded border truncate max-w-[80px] sm:max-w-none"></div>
-                    <div id="session-display" class="text-[10px] sm:text-xs font-mono bg-blue-50 text-blue-600 px-1.5 sm:px-2 py-1 rounded border border-blue-200 cursor-default" data-i18n-title="current_session" title="当前对话号"></div>
-                    <!-- History Button -->
-                    <button onclick="toggleSessionSidebar()" class="desktop-only-btn text-[10px] sm:text-xs bg-gray-50 text-gray-600 hover:bg-gray-100 px-2 py-1 rounded border border-gray-200 transition-colors flex items-center justify-center" data-i18n-title="history_title" title="Agents">
-                        <span class="hidden sm:inline" data-i18n="history">🤖Agents</span>
-                        <span class="sm:hidden text-base leading-none">🤖</span>
-                    </button>
-                    <!-- OpenClaw Quick Config Button -->
-                    <button onclick="orchOpenClawQuickConfig()" class="desktop-only-btn text-[10px] sm:text-xs bg-orange-50 text-orange-600 hover:bg-orange-100 px-2 py-1 rounded border border-orange-300 transition-colors flex items-center justify-center font-semibold" data-i18n-title="orch_oc_quick_title" title="Setting OpenClaw Agent">
-                        <span class="hidden sm:inline" data-i18n="orch_oc_quick_btn">🦞 Setting OpenClaw Agent</span>
-                        <span class="sm:hidden text-base leading-none">🦞</span>
-                    </button>
-                    <!-- New Session Button: Visible on all devices -->
-                    <button onclick="handleNewSession()" class="text-[10px] sm:text-xs bg-green-50 text-green-600 hover:bg-green-100 px-2 py-1 rounded border border-green-200 transition-colors mr-1 flex items-center justify-center" data-i18n-title="new_session_confirm" title="开启新对话">
-                        <span class="sm:hidden text-base font-bold leading-none">+</span>
-                        <span class="hidden sm:inline" data-i18n="new_chat">+新</span>
-                    </button>
-                    <button onclick="toggleLanguage()" id="lang-toggle-btn" class="text-[10px] sm:text-xs bg-purple-50 text-purple-600 hover:bg-purple-100 px-2 py-1 rounded border border-purple-200 transition-colors" title="Switch Language">EN</button>
-                    <button onclick="openSettings()" class="desktop-only-btn text-[10px] sm:text-xs bg-gray-50 text-gray-600 hover:bg-gray-100 px-2 py-1 rounded border border-gray-200 transition-colors" data-i18n="settings" data-i18n-title="settings_title" title="系统设置">⚙️</button>
-                    <div id="public-toggle-wrap" class="desktop-only-btn" style="display:inline-flex;align-items:center;gap:4px;">
-                        <span style="font-size:10px;color:#888;" id="public-toggle-label">🌐</span>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="public-toggle" onchange="handlePublicToggle(this.checked)" disabled>
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                    <button onclick="handleLogout()" class="desktop-only-btn text-[10px] sm:text-xs text-gray-400 hover:text-red-500 px-1.5 sm:px-2 py-1 rounded transition-colors" data-i18n="logout" data-i18n-title="logout" title="切换用户">退出</button>
-                    <!-- Mobile: hamburger menu -->
-                    <div class="mobile-menu-wrapper" style="position:relative;">
-                        <button onclick="toggleMobileMenu()" class="mobile-menu-btn text-[10px] bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded border border-gray-300 transition-colors" data-i18n-title="more_actions" title="更多操作">⋮</button>
-                        <div id="mobile-menu-dropdown" class="mobile-menu-dropdown" style="display:none;">
-                            <button onclick="toggleSessionSidebar(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_history">🤖 Agents</button>
-                            <button onclick="orchOpenClawQuickConfig(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_openclaw_cfg">🦞 OpenClaw</button>
-                            <button onclick="handleNewSession(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_new">➕ 新对话</button>
-                            <button onclick="toggleOasisMobile(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_oasis">🏛️ TeamsWork</button>
-                            <button onclick="openSettings(); closeMobileMenu();" class="mobile-menu-item" data-i18n="menu_settings">⚙️ 设置</button>
-                            <button onclick="handleLogout(); closeMobileMenu();" class="mobile-menu-item text-red-500" data-i18n="menu_logout">🚪 退出</button>
-                        </div>
-                    </div>
-                </div>
-            </header>
 
             <div id="chat-box" class="chat-container overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6 flex-grow bg-gray-50">
                 <div class="flex justify-start">

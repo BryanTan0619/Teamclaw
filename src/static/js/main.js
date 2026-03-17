@@ -1,3 +1,50 @@
+// ── Page Loading Overlay (smooth delayed show/hide) ──
+// Only shows the loading overlay if the operation takes > 300ms,
+// so fast operations feel instant without any flicker.
+const _pageLoading = {
+    timer: null,
+    visible: false,
+    startTime: 0,
+    DELAY: 300,        // ms before showing overlay
+    MIN_VISIBLE: 400,  // ms minimum visible time to avoid flash
+};
+
+function showPageLoading(text) {
+    _pageLoading.startTime = Date.now();
+    // Clear any pending hide
+    if (_pageLoading.timer) { clearTimeout(_pageLoading.timer); _pageLoading.timer = null; }
+    // Delay showing: only show if still loading after DELAY ms
+    _pageLoading.timer = setTimeout(() => {
+        const el = document.getElementById('page-loading-overlay');
+        if (!el) return;
+        if (text) {
+            const txt = el.querySelector('.page-loading-text');
+            if (txt) txt.textContent = text;
+        }
+        el.classList.add('loading-visible');
+        _pageLoading.visible = true;
+        _pageLoading.timer = null;
+    }, _pageLoading.DELAY);
+}
+
+function hidePageLoading() {
+    const elapsed = Date.now() - _pageLoading.startTime;
+    // If overlay was never shown (fast operation), just cancel the timer
+    if (_pageLoading.timer) {
+        clearTimeout(_pageLoading.timer);
+        _pageLoading.timer = null;
+    }
+    if (!_pageLoading.visible) return; // never became visible → nothing to hide
+    // If it just became visible, keep it for MIN_VISIBLE to avoid flash
+    const visibleSince = elapsed - _pageLoading.DELAY;
+    const remaining = Math.max(0, _pageLoading.MIN_VISIBLE - visibleSince);
+    setTimeout(() => {
+        const el = document.getElementById('page-loading-overlay');
+        if (el) el.classList.remove('loading-visible');
+        _pageLoading.visible = false;
+    }, remaining);
+}
+
 const i18n = {
     'zh-CN': {
         // 通用
@@ -36,6 +83,15 @@ const i18n = {
         menu_oasis: '🏛️ TeamsWork',
         menu_openclaw_cfg: '🦞 OpenClaw 配置',
         menu_logout: '🚪 退出',
+        // 汉堡菜单 (no emoji, icon is separate)
+        hmenu_agents: 'Agents',
+        hmenu_settings: '设置',
+        hmenu_openclaw: 'OpenClaw 配置',
+        hmenu_new: '新对话',
+        hmenu_oasis: 'TeamsWork',
+        hmenu_logout: '退出',
+        hmenu_lang: '语言',
+        hmenu_public: '公开',
 
         // 聊天区域
         welcome_message: '你好！我是 TeamBot 智能助手。我已经准备好为你服务，请输入你的指令。',
@@ -529,6 +585,15 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         menu_oasis: '🏛️ TeamsWork',
         menu_openclaw_cfg: '🦞 OpenClaw Config',
         menu_logout: '🚪 Logout',
+        // Hamburger menu (no emoji, icon is separate)
+        hmenu_agents: 'Agents',
+        hmenu_settings: 'Settings',
+        hmenu_openclaw: 'OpenClaw Config',
+        hmenu_new: 'New Chat',
+        hmenu_oasis: 'TeamsWork',
+        hmenu_logout: 'Logout',
+        hmenu_lang: 'Language',
+        hmenu_public: 'Public',
 
         // Chat area
         welcome_message: 'Hello! I am TeamBot AI Assistant. Ready to serve you. Please enter your instructions.',
@@ -1968,6 +2033,7 @@ async function deleteAllSessions() {
 
 async function switchToSession(sessionId, force = false) {
     if (!force && sessionId === currentSessionId) { closeSessionSidebar(); return; }
+    showPageLoading();
     hideNewMsgBanner();
     // 切换前先重置按钮到 idle 状态（避免旧 session 的 streaming/busy 状态残留）
     setStreamingUI(false);
@@ -2074,7 +2140,9 @@ async function switchToSession(sessionId, force = false) {
         } else {
             setSystemBusyUI(false);
         }
-    } catch(e) {}
+    } catch(e) {} finally {
+        hidePageLoading();
+    }
 }
 
 // ===== 本机免密登录 =====
@@ -2101,6 +2169,7 @@ async function handleLocalLogin() {
 
     localLoginBtn.disabled = true;
     localLoginBtn.textContent = t('login_verifying');
+    showPageLoading();
 
     try {
         const controller = new AbortController();
@@ -2142,6 +2211,7 @@ async function handleLocalLogin() {
     } finally {
         localLoginBtn.disabled = false;
         localLoginBtn.textContent = t('local_login_btn') || '本机免密登录';
+        hidePageLoading();
     }
 }
 
@@ -2167,6 +2237,7 @@ async function handleLogin() {
 
     loginBtn.disabled = true;
     loginBtn.textContent = t('login_verifying');
+    showPageLoading();
 
     try {
         const controller = new AbortController();
@@ -2210,6 +2281,7 @@ async function handleLogin() {
     } finally {
         loginBtn.disabled = false;
         loginBtn.textContent = t('login_btn');
+        hidePageLoading();
     }
 }
 
@@ -3526,6 +3598,31 @@ function toggleOasisMobile() {
     }
 }
 
+// ── Hamburger menu (tab-bar left ☰ button) ──
+function toggleHamburgerMenu() {
+    const panel = document.getElementById('hamburger-panel');
+    if (!panel) return;
+    if (panel.style.display === 'none' || !panel.style.display) {
+        // Sync UID display
+        const uidSrc = document.getElementById('uid-display');
+        const uidDst = document.getElementById('hamburger-uid');
+        if (uidSrc && uidDst) uidDst.textContent = uidSrc.textContent || '—';
+        panel.style.display = 'block';
+        // Close on outside click
+        setTimeout(() => document.addEventListener('click', _closeHamburgerOutside, { once: true }), 0);
+    } else {
+        panel.style.display = 'none';
+    }
+}
+function closeHamburgerMenu() {
+    const panel = document.getElementById('hamburger-panel');
+    if (panel) panel.style.display = 'none';
+}
+function _closeHamburgerOutside(e) {
+    const wrapper = document.querySelector('.hamburger-menu-wrapper');
+    if (wrapper && !wrapper.contains(e.target)) closeHamburgerMenu();
+}
+
 function toggleMobileMenu() {
     const dd = document.getElementById('mobile-menu-dropdown');
     if (dd.style.display === 'none') {
@@ -3625,13 +3722,18 @@ function escapeHtml(text) {
 async function openOasisTopic(topicId) {
     oasisCurrentTopicId = topicId;
     stopOasisPolling();
+    showPageLoading();
 
     // Switch to detail view
     document.getElementById('oasis-topic-list-view').style.display = 'none';
     document.getElementById('oasis-detail-view').style.display = 'flex';
 
     // Load topic detail
-    await loadTopicDetail(topicId);
+    try {
+        await loadTopicDetail(topicId);
+    } finally {
+        hidePageLoading();
+    }
 }
 
 function showOasisTopicList() {
@@ -4111,8 +4213,9 @@ document.addEventListener('click', function(e) {
     }
 });
 
-function switchPage(page) {
+async function switchPage(page) {
     currentPage = page;
+    showPageLoading();
     // Update tabs
     document.getElementById('tab-chat').classList.toggle('active', page === 'chat');
     document.getElementById('tab-group').classList.toggle('active', page === 'group');
@@ -4121,34 +4224,38 @@ function switchPage(page) {
     const chatPage = document.getElementById('page-chat');
     const groupPage = document.getElementById('page-group');
     const orchPage = document.getElementById('page-orchestrate');
-    if (page === 'chat') {
-        chatPage.classList.remove('hidden-page');
-        chatPage.style.display = 'flex';
-        groupPage.classList.remove('active');
-        groupPage.classList.remove('mobile-chat-open');
-        if (orchPage) orchPage.classList.remove('active');
-        stopGroupPolling();
-        stopGroupListPolling();
-    } else if (page === 'group') {
-        chatPage.classList.add('hidden-page');
-        chatPage.style.display = 'none';
-        groupPage.classList.add('active');
-        if (orchPage) orchPage.classList.remove('active');
-        loadGroupList();
-        startGroupListPolling();
-        // 如果已有打开的群，恢复消息轮询
-        if (currentGroupId) {
-            startGroupPolling(currentGroupId);
+    try {
+        if (page === 'chat') {
+            chatPage.classList.remove('hidden-page');
+            chatPage.style.display = 'flex';
+            groupPage.classList.remove('active');
+            groupPage.classList.remove('mobile-chat-open');
+            if (orchPage) orchPage.classList.remove('active');
+            stopGroupPolling();
+            stopGroupListPolling();
+        } else if (page === 'group') {
+            chatPage.classList.add('hidden-page');
+            chatPage.style.display = 'none';
+            groupPage.classList.add('active');
+            if (orchPage) orchPage.classList.remove('active');
+            await loadGroupList();
+            startGroupListPolling();
+            // 如果已有打开的群，恢复消息轮询
+            if (currentGroupId) {
+                startGroupPolling(currentGroupId);
+            }
+        } else if (page === 'orchestrate') {
+            chatPage.classList.add('hidden-page');
+            chatPage.style.display = 'none';
+            groupPage.classList.remove('active');
+            groupPage.classList.remove('mobile-chat-open');
+            if (orchPage) orchPage.classList.add('active');
+            stopGroupPolling();
+            stopGroupListPolling();
+            if (!window._orchInitialized) { orchInit(); window._orchInitialized = true; }
         }
-    } else if (page === 'orchestrate') {
-        chatPage.classList.add('hidden-page');
-        chatPage.style.display = 'none';
-        groupPage.classList.remove('active');
-        groupPage.classList.remove('mobile-chat-open');
-        if (orchPage) orchPage.classList.add('active');
-        stopGroupPolling();
-        stopGroupListPolling();
-        if (!window._orchInitialized) { orchInit(); window._orchInitialized = true; }
+    } finally {
+        hidePageLoading();
     }
 }
 
@@ -4203,6 +4310,7 @@ function renderGroupList(teams) {
 }
 
 async function openGroup(teamName) {
+    showPageLoading();
     currentGroupId = teamName;
     groupLastMsgId = 0;
     stopGroupPolling();
@@ -4295,10 +4403,11 @@ async function openGroup(teamName) {
     document.getElementById('group-available-sessions').innerHTML = '<div class="text-xs text-gray-400 p-2">加载中...</div>';
 
     // 默认加载并显示成员表
-    loadTeamMembers();
+    await loadTeamMembers();
 
     // 更新团队列表选中状态
-    loadGroupList();
+    await loadGroupList();
+    hidePageLoading();
 }
 
 function groupBackToList() {
