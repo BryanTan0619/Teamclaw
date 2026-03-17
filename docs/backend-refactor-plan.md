@@ -75,10 +75,10 @@ Use layered boundaries per service:
 
 ## Progress Snapshot
 
-- Phase 1 done:
+- Phase 1 ✅ done:
   - Auth helpers extracted to `src/user_auth.py`.
   - `.env` settings logic extracted to `src/env_settings.py`.
-- Phase 2 in progress:
+- Phase 2 ✅ done:
   - Group chat endpoints and helpers extracted to `src/group_routes.py` and mounted via `app.include_router(...)`.
   - Group domain split into route/service/model layers (`src/group_routes.py`, `src/group_service.py`, `src/group_models.py`).
   - Group chat DB access moved to repository layer (`src/group_repository.py`), `group_service` now focuses on orchestration.
@@ -99,11 +99,20 @@ Use layered boundaries per service:
   - System trigger domain split into route/service/model layers (`src/system_routes.py`, `src/system_service.py`, `src/system_models.py`).
   - Session summary extraction logic unified in `src/session_summary.py` and reused by `mainagent` + group routes.
   - Multimodal message construction extracted to `src/message_builder.py`.
-  - `src/mainagent.py` now focuses on app bootstrap, auth primitives, and router composition.
+  - `src/mainagent.py` now focuses on app bootstrap, auth primitives, and router composition (177 lines, down from ~2000).
   - Agent runtime state extracted to `src/agent_runtime_state.py` (task registry + thread state registry), reducing `MiniTimeAgent` state-management coupling.
   - OpenAI protocol conversion/encoding extracted to `src/openai_protocol.py`, with `openai_service` delegating message transform and response/chunk formatting.
   - Shared logging bootstrap added in `src/logging_utils.py`, and main chain modules (`mainagent/group/system/user_auth`) switched from ad-hoc `print` to logger.
-  - Frontend gateway route split started: group proxy routes moved to `src/front_group_routes.py`, OASIS proxy routes moved to `src/front_oasis_routes.py`.
+- Phase 3 ✅ done:
+  - Frontend gateway route split: group proxy routes moved to `src/front_group_routes.py`, OASIS proxy routes moved to `src/front_oasis_routes.py`.
   - Session proxy routes moved to `src/front_session_routes.py`, reducing `front.py` route density and keeping endpoint contracts unchanged.
+  - `front.py` kept as Flask UI + auth session + proxy with ~300 lines removed from route density.
+- Phase 4 ✅ done:
   - OASIS OpenClaw CLI helpers extracted to `oasis/openclaw_cli.py` and reused by `oasis/server.py`.
-  - Smoke tests expanded for new components: `test/test_agent_runtime_state.py`, `test/test_openai_protocol.py`.
+  - All OpenClaw routes (`/sessions/openclaw/*`, 14 endpoints) extracted to `oasis/openclaw_routes.py` using `APIRouter`.
+  - `oasis/server.py` reduced from 1803 to 876 lines, now focused on topic/expert/workflow domains.
+  - OpenClaw routes initialized via `init_openclaw_routes()` with explicit dependency injection.
+- Phase 5 in progress:
+  - Unit tests added for core refactored components: `test/test_agent_runtime_state.py` (12 tests), `test/test_openai_protocol.py` (19 tests).
+  - Structured logging via `logging_utils.py` adopted in main chain modules.
+  - Remaining: request ID propagation, integration tests for end-to-end flows, migration/rollback playbook.
