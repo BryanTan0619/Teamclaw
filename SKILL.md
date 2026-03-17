@@ -47,21 +47,21 @@ A Team is the unit of collaboration, composed of:
 | └─ Built-in Agent | TeamClaw's lightweight agents (file management, command execution, social media) |
 | └─ OpenClaw Agent | Agents from the external OpenClaw platform |
 | └─ External API Agent | Any external API service (e.g. GPT-4 API) |
-| **Custom Expert** | A persona defined via prompt — identity, personality, capabilities |
+| **Persona (Expert Prompt)** | A special prompt that defines an Agent's identity, personality, and capabilities. In YAML/CLI the field is named `expert`, but it is essentially an **expert persona prompt** — not a separate agent. See `oasis_experts.json` for the prompt collection. |
 | **Workflow** | Defines how members collaborate (sequential, parallel, conditional, loop) |
 
 > **Public vs Private**:
-> - **Public Agent/Expert**: Available outside any team; can be added to a team for use within it
-> - **Private Agent/Expert**: Only available within the current team
-> - **Public Workflow**: Can only use public Agents/Experts
+> - **Public Agent/Persona**: Available outside any team; can be added to a team for use within it
+> - **Private Agent/Persona**: Only available within the current team
+> - **Public Workflow**: Can only use public Agents/Personas
 > - **Private Workflow**: Only available within the current team; can only use agents already added to the team
 
 ### Core Capabilities
 
 1. **Visual Agent Orchestration**
    - Compose OpenClaw Agents, built-in Agents, or any external API Agent into a "Team"
-   - Drag-and-drop experts on the Web UI canvas (OASIS), configure collaboration relationships
-   - **Expert**: A persona — a special prompt that defines an Agent's role and capabilities
+- Drag-and-drop personas on the Web UI canvas (OASIS), configure collaboration relationships
+   - **Persona (Expert Prompt)**: A persona (人设) — a special prompt that defines an Agent's role and capabilities. The YAML/CLI field is named `expert` but represents an **expert persona prompt**, not a separate agent.
    - **Agent**: An entity with tools, skills, and prompts that can execute concrete tasks
    - **OpenClaw Agent**: Configurable with custom tools, skills, and prompts via OpenClaw
 
@@ -91,7 +91,7 @@ TeamClaw includes **lightweight agents** (a streamlined version of OpenClaw):
 
 | Feature | Description |
 |---------|-------------|
-| **Team Chat** | Multi-expert parallel discussion/execution, supports 4 expert types |
+| **Team Chat** | Multi-persona parallel discussion/execution, supports 4 persona types |
 | **OASIS Workflow** | Visual canvas orchestration, drives parallel agent teams |
 | **Scheduled Tasks** | APScheduler-based task scheduling center |
 | **Web UI** | Full chat interface with passwordless login via 127.0.0.1 |
@@ -108,8 +108,8 @@ For non-install background material, see:
 
 - [docs/overview.md](./docs/overview.md) — Platform overview and architecture
 - [docs/cli.md](./docs/cli.md) — Complete CLI command reference
-- [docs/build_team.md](./docs/build_team.md) — How to build and configure a Team (members, experts, JSON files)
-- [docs/create_workflow.md](./docs/create_workflow.md) — How to create OASIS workflow YAML (graph format, expert types, examples)
+- [docs/build_team.md](./docs/build_team.md) — How to build and configure a Team (members, personas, JSON files)
+- [docs/create_workflow.md](./docs/create_workflow.md) — How to create OASIS workflow YAML (graph format, persona types, examples)
 - [docs/example_team.md](./docs/example_team.md) — Example Team file structure and contents
 - [docs/openclaw-commands.md](./docs/openclaw-commands.md) — OpenClaw integration commands
 - [docs/ports.md](./docs/ports.md) — Port configuration and management
@@ -122,7 +122,7 @@ TeamClaw stores all team-specific data in the following path structure:
 data/user_files/{user_id}/teams/{team_name}/
 ├── internal_agents.json      # Internal agent (expert) session bindings
 ├── external_agents.json      # External agent definitions (OpenClaw, custom API)
-├── oasis_experts.json        # Expert persona definitions
+├── oasis_experts.json        # Persona prompt collection (人设 prompt 集合)
 └── oasis/yaml/
     └── *.yaml                # Team workflow YAML files
 ```
@@ -173,6 +173,13 @@ uv run scripts/cli.py -u <user> teams add-ext-member \
 uv run scripts/cli.py -u <user> openclaw snapshot export \
   --team-name <TEAM> --name <name>
 ```
+
+**OASIS Workflow配置格式要求：**
+- **Expert字段**：必须使用`tag#ext#id`格式（如：`openclaw#ext#my_new_agent`）
+- **Model字段**：支持session扩展：
+  - `agent:<name>` - 默认使用团队名称作为session
+  - `agent:<name>:<session>` - 显式指定session名称
+- **Session控制**：相同session共享上下文，不同session保持独立
 
 > 📖 **Required Reading:**
 > - `docs/openclaw-commands.md` — OpenClaw integration details
@@ -242,8 +249,8 @@ Before performing operations, read the corresponding docs:
 
 | Operation | Read This Doc | Purpose |
 |-----------|---------------|---------|
-| Create/Modify Team | `docs/build_team.md` | How to configure members, experts, JSON files |
-| Create/Modify Workflow | `docs/create_workflow.md` | OASIS YAML format, expert types, graph structure |
+| Create/Modify Team | `docs/build_team.md` | How to configure members, personas, JSON files |
+| Create/Modify Workflow | `docs/create_workflow.md` | OASIS YAML format, persona types, graph structure |
 | Use CLI Commands | `docs/cli.md` | Complete CLI reference and examples |
 | Understand Team Structure | `docs/example_team.md` | Example file structure and contents |
 | OpenClaw Integration | `docs/openclaw-commands.md` | OpenClaw agent commands |
@@ -450,9 +457,16 @@ powershell -ExecutionPolicy Bypass -File selfskill/scripts/run.ps1 check-opencla
 ```
 
 **Configuring OpenClaw Agent in OASIS Canvas:**
-- Drag an OpenClaw expert onto the canvas
-- Model format: `agent:<agent_name>:<session_name>`
-- Example: `agent:main:default`
+- Drag an OpenClaw persona onto the canvas
+- **Expert field format**: `tag#ext#id` (必须使用short name格式，如：`openclaw#ext#my_new_agent`)
+- **Model format**: `agent:<agent_name>` 或 `agent:<agent_name>:<session_name>`
+- **Examples**: 
+  - `agent:main:default` (显式指定session)
+  - `agent:my_new_agent` (默认使用团队名称作为session)
+
+**关键配置要求：**
+- expert字段（人设标识）必须使用`tag#ext#id`格式（tag可以是openclaw、codex等）
+- model字段支持session扩展，相同session共享上下文，不同session保持独立
 
 ### Tunnel
 
@@ -511,7 +525,7 @@ uv run scripts/cli.py -u <username> teams list
 
 ### View Full Team Info
 
-Use `teams info` to aggregate and display all information for a team (members, experts, workflows, topics) in one shot:
+Use `teams info` to aggregate and display all information for a team (members, personas, workflows, topics) in one shot:
 
 ```bash
 uv run scripts/cli.py -u <username> teams info --team-name <team_name>

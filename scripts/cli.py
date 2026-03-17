@@ -617,9 +617,9 @@ def cmd_topics(args):
             _err(code, body)
 
 
-# ── experts: OASIS 专家 ──────────────────────────────────────────────
+# ── experts: OASIS 人设 ──────────────────────────────────────────────
 def cmd_experts(args):
-    """OASIS 专家管理"""
+    """OASIS 人设管理"""
     act = args.action
 
     if act == "list":
@@ -630,9 +630,9 @@ def cmd_experts(args):
         if code == 200:
             experts = body if isinstance(body, list) else body.get("experts", [body])
             if not experts:
-                print("📭 暂无专家")
+                print("📭 暂无人设")
                 return
-            print(f"🧑‍🏫 专家列表 ({len(experts)} 个):\n")
+            print(f"🧑‍🏫 人设列表 ({len(experts)} 个):\n")
             for e in experts:
                 tag = e.get("tag", e.get("id", "?"))
                 name = e.get("name", tag)
@@ -645,13 +645,13 @@ def cmd_experts(args):
 
     elif act == "add":
         if not args.tag:
-            print("❌ 请指定 --tag <专家标签>", file=sys.stderr); return
-        if not args.expert_name:
-            print("❌ 请指定 --expert-name <专家名称>", file=sys.stderr); return
+            print("❌ 请指定 --tag <人设标签>", file=sys.stderr); return
+        if not args.persona_name:
+            print("❌ 请指定 --persona-name <人设名称>", file=sys.stderr); return
         data = {
             "user_id": args.user,
             "tag": args.tag,
-            "name": args.expert_name,
+            "name": args.persona_name,
             "team": args.team or "",
         }
         if args.persona:
@@ -660,18 +660,18 @@ def cmd_experts(args):
             data["temperature"] = args.temperature
         code, body = _req("POST", f"{OASIS_BASE}/experts/user", data=data)
         if code == 200:
-            print(f"✅ 专家已添加: [{args.tag}] {args.expert_name}")
+            print(f"✅ 人设已添加: [{args.tag}] {args.persona_name}")
             _pp(body)
         else:
             _err(code, body)
 
     elif act == "update":
         if not args.tag:
-            print("❌ 请指定 --tag <专家标签>", file=sys.stderr); return
+            print("❌ 请指定 --tag <人设标签>", file=sys.stderr); return
         data = {
             "user_id": args.user,
             "tag": args.tag,
-            "name": args.expert_name or "",
+            "name": args.persona_name or "",
             "team": args.team or "",
         }
         if args.persona:
@@ -680,20 +680,20 @@ def cmd_experts(args):
             data["temperature"] = args.temperature
         code, body = _req("PUT", f"{OASIS_BASE}/experts/user/{args.tag}", data=data)
         if code == 200:
-            print(f"✅ 专家已更新: [{args.tag}]")
+            print(f"✅ 人设已更新: [{args.tag}]")
             _pp(body)
         else:
             _err(code, body)
 
     elif act == "delete":
         if not args.tag:
-            print("❌ 请指定 --tag <专家标签>", file=sys.stderr); return
+            print("❌ 请指定 --tag <人设标签>", file=sys.stderr); return
         params = {"user_id": args.user}
         if args.team:
             params["team"] = args.team
         code, body = _req("DELETE", f"{OASIS_BASE}/experts/user/{args.tag}", params=params)
         if code == 200:
-            print(f"✅ 专家已删除: [{args.tag}]")
+            print(f"✅ 人设已删除: [{args.tag}]")
         else:
             _err(code, body)
 
@@ -1163,7 +1163,7 @@ def cmd_visual(args):
     _check_token()
     act = args.action
 
-    if act == "experts":
+    if act == "personas":
         params = {}
         if args.team:
             params["team"] = args.team
@@ -1174,19 +1174,19 @@ def cmd_visual(args):
         else:
             _err(code, body)
 
-    elif act == "add-expert":
+    elif act == "add-persona":
         data = json.loads(args.data) if args.data else {}
         if args.team:
             data["team"] = args.team
         code, body = _req("POST", f"{FRONT_BASE}/proxy_visual/experts/custom",
                            headers=_front_headers(), data=data)
         if code == 200:
-            print("✅ 自定义专家已添加")
+            print("✅ 自定义人设已添加")
             _pp(body)
         else:
             _err(code, body)
 
-    elif act == "delete-expert":
+    elif act == "delete-persona":
         params = {}
         if args.team:
             params["team"] = args.team
@@ -1194,9 +1194,10 @@ def cmd_visual(args):
                            f"{FRONT_BASE}/proxy_visual/experts/custom/{args.tag}",
                            headers=_front_headers(), params=params)
         if code == 200:
-            print("✅ 专家已删除")
+            print("✅ 人设已删除")
         else:
             _err(code, body)
+
 
     elif act == "generate-yaml":
         data = json.loads(args.data) if args.data else {}
@@ -1442,11 +1443,11 @@ def cmd_teams(args):
         else:
             print(f"  ⚠️ 获取成员失败: [{code}]", file=sys.stderr)
 
-        # ── 2. 专家 ──
+        # ── 2. 人设 ──
         code2, body2 = _req("GET", f"{FRONT_BASE}/teams/{team}/experts", headers=hdrs)
         if code2 == 200:
             experts = body2.get("experts", [])
-            print(f"\n🧑‍🏫 自定义专家 ({len(experts)} 个):")
+            print(f"\n🧑‍🏫 自定义人设 ({len(experts)} 个):")
             if experts:
                 for e in experts:
                     tag = e.get("tag", "?")
@@ -1459,9 +1460,9 @@ def cmd_teams(args):
                             preview += "..."
                         print(f"    {preview}")
             else:
-                print("  📭 暂无自定义专家")
+                print("  📭 暂无自定义人设")
         else:
-            print(f"  ⚠️ 获取专家失败: [{code2}]", file=sys.stderr)
+            print(f"  ⚠️ 获取人设失败: [{code2}]", file=sys.stderr)
 
         # ── 3. Workflows ──
         params_wf = {"user_id": args.user, "team": team}
@@ -1585,7 +1586,7 @@ def cmd_teams(args):
         else:
             _err(code, body)
 
-    elif act == "experts":
+    elif act == "personas":
         if not args.team_name:
             print("❌ 请指定 --team-name", file=sys.stderr); return
         code, body = _req("GET",
@@ -1596,7 +1597,7 @@ def cmd_teams(args):
         else:
             _err(code, body)
 
-    elif act == "add-expert":
+    elif act == "add-persona":
         if not args.team_name:
             print("❌ 请指定 --team-name", file=sys.stderr); return
         data = json.loads(args.data) if args.data else {}
@@ -1604,12 +1605,12 @@ def cmd_teams(args):
                            f"{FRONT_BASE}/teams/{args.team_name}/experts",
                            headers=_front_headers(), data=data)
         if code == 200:
-            print("✅ 专家已添加")
+            print("✅ 人设已添加")
             _pp(body)
         else:
             _err(code, body)
 
-    elif act == "update-expert":
+    elif act == "update-persona":
         if not args.team_name or not args.tag:
             print("❌ 请指定 --team-name 和 --tag", file=sys.stderr); return
         data = json.loads(args.data) if args.data else {}
@@ -1617,19 +1618,19 @@ def cmd_teams(args):
                            f"{FRONT_BASE}/teams/{args.team_name}/experts/{args.tag}",
                            headers=_front_headers(), data=data)
         if code == 200:
-            print("✅ 专家已更新")
+            print("✅ 人设已更新")
             _pp(body)
         else:
             _err(code, body)
 
-    elif act == "delete-expert":
+    elif act == "delete-persona":
         if not args.team_name or not args.tag:
             print("❌ 请指定 --team-name 和 --tag", file=sys.stderr); return
         code, body = _req("DELETE",
                            f"{FRONT_BASE}/teams/{args.team_name}/experts/{args.tag}",
                            headers=_front_headers())
         if code == 200:
-            print("✅ 专家已删除")
+            print("✅ 人设已删除")
             _pp(body)
         else:
             _err(code, body)
@@ -1933,15 +1934,15 @@ def build_parser():
 
     # visual
     c = sub.add_parser("visual", help="可视化编排管理")
-    c.add_argument("action", nargs="?", default="experts",
-                   choices=["experts", "add-expert", "delete-expert",
+    c.add_argument("action", nargs="?", default="personas",
+                   choices=["personas", "add-persona", "delete-persona",
                             "generate-yaml", "agent-generate-yaml",
                             "save-layout", "load-layouts", "load-layout",
                             "load-yaml-raw", "delete-layout", "upload-yaml",
                             "sessions-status"],
-                   help="操作 (默认: experts)")
+                   help="操作 (默认: personas)")
     c.add_argument("--team", help="Team 名称")
-    c.add_argument("--tag", help="专家 tag (delete-expert 时)")
+    c.add_argument("--tag", help="人设 tag (delete-persona 时)")
     c.add_argument("--name", help="布局名称 (load-layout/load-yaml-raw/delete-layout 时)")
     c.add_argument("--data", help="JSON 数据")
 
@@ -1960,12 +1961,12 @@ def build_parser():
     c.add_argument("action", nargs="?", default="list",
                    choices=["list", "info", "create", "delete", "members",
                             "add-ext-member", "delete-ext-member",
-                            "update-ext-member", "experts", "add-expert",
-                            "update-expert", "delete-expert",
+                            "update-ext-member", "personas", "add-persona",
+                            "update-persona", "delete-persona",
                             "snapshot-download", "snapshot-upload"],
                    help="操作 (默认: list)")
     c.add_argument("--team-name", help="Team 名称")
-    c.add_argument("--tag", help="专家 tag (update-expert/delete-expert 时)")
+    c.add_argument("--tag", help="人设 tag (update-persona/delete-persona 时)")
     c.add_argument("--data", help="JSON 数据")
     c.add_argument("-o", "--output", help="输出文件 (snapshot-download 时)")
     c.add_argument("--file", help="上传文件路径 (snapshot-upload 时)")
@@ -1980,13 +1981,13 @@ def build_parser():
     c.add_argument("--full", action="store_true", help="不截断长内容 (show 时)")
 
     # experts
-    c = sub.add_parser("experts", help="OASIS 专家管理")
+    c = sub.add_parser("personas", help="OASIS 人设管理")
     c.add_argument("action", nargs="?", default="list",
                    choices=["list", "add", "update", "delete"],
                    help="操作 (默认: list)")
-    c.add_argument("--tag", help="专家标签 (唯一标识)")
-    c.add_argument("--expert-name", help="专家显示名称")
-    c.add_argument("--persona", help="专家人设描述")
+    c.add_argument("--tag", help="人设标签 (唯一标识)")
+    c.add_argument("--persona-name", help="人设显示名称")
+    c.add_argument("--persona", help="人设描述")
     c.add_argument("--temperature", type=float, help="温度参数 (0-2)")
     c.add_argument("--team", help="Team 名称")
 
@@ -2054,7 +2055,7 @@ def main():
         "internal-agents": cmd_internal_agents,
         "teams": cmd_teams,
         "topics": cmd_topics,
-        "experts": cmd_experts,
+        "personas": cmd_experts,
         "workflows": cmd_workflows,
         "tunnel": cmd_tunnel,
         "status": cmd_status,

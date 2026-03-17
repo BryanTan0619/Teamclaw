@@ -7,8 +7,8 @@
 
 ## 1. Overview
 
-OASIS workflows define how expert agents collaborate to solve tasks. A workflow is a directed graph where:
-- **Nodes** (`plan`) represent expert steps, manual injections, or special control nodes (selectors)
+OASIS workflows define how persona-driven agents collaborate to solve tasks. A workflow is a directed graph where:
+- **Nodes** (`plan`) represent persona steps, manual injections, or special control nodes (selectors)
 - **Edges** define execution order — a node runs when all its incoming edges are satisfied
 - **Conditional edges** enable branching based on runtime conditions
 - **Selector edges** enable LLM-powered routing (the selector node chooses which branch to take)
@@ -26,13 +26,13 @@ version: 2
 repeat: false
 plan:
   - id: n1                        # Every node MUST have a unique id
-    expert: "creative#temp#1"     # Stateless preset expert
+    expert: "creative#temp#1"     # Stateless preset persona
   - id: n2
     expert: "critical#temp#1"
   - id: n3
     expert: "#oasis#agent_name"   # Stateful internal session agent (by name)
   - id: n4
-    expert: "tag#oasis#agent_name" # Session agent with tag (tag→persona)
+    expert: "tag#oasis#agent_name" # Session agent with tag (tag→persona lookup)
   - id: m1
     manual:
       author: "主持人"
@@ -115,22 +115,24 @@ plan:
 
 ---
 
-## 4. Expert Name Formats
+## 4. Persona Name Formats (expert field)
 
-Expert names follow a `tag#mode#identifier` convention:
+> **Note:** The YAML field is named `expert`, but it represents a **persona (人设)** — an **expert persona prompt** that defines an Agent's role and capabilities. It is NOT a separate agent. The `oasis_experts.json` file in each team folder is the persona prompt collection where these prompts are stored.
+
+Persona names follow a `tag#mode#identifier` convention:
 
 | Format | Mode | Description | Example |
 |--------|------|-------------|---------|
-| `tag#temp#N` | Stateless | Preset expert instance N (no memory) | `creative#temp#1` |
-| `tag#oasis#new` | Stateful | Auto-create new session for this expert | `critical#oasis#new` |
+| `tag#temp#N` | Stateless | Preset persona instance N (no memory) | `creative#temp#1` |
+| `tag#oasis#new` | Stateful | Auto-create new session for this persona | `critical#oasis#new` |
 | `tag#oasis#name` | Stateful | Internal session agent by name (tag enables persona lookup) | `architect#oasis#my_architect` |
 | `#oasis#name` | Stateful | Internal session agent by name (no tag) | `#oasis#test1` |
 | `tag#ext#id` | External | External ACP agent | `openclaw#ext#Alice` |
 
 ### 4.1 Stateless vs Stateful
 
-- **Stateless** (`#temp#`): Lightweight, no memory between rounds. Suitable for debates, brainstorming, and one-shot analysis.
-- **Stateful** (`#oasis#`): Has memory and tools. The session persists across rounds, suitable for complex multi-step tasks.
+- **Stateless** (`#temp#`): Lightweight persona, no memory between rounds. Suitable for debates, brainstorming, and one-shot analysis.
+- **Stateful** (`#oasis#`): Persona with memory and tools. The session persists across rounds, suitable for complex multi-step tasks.
 
 ### 4.2 External ACP Agents
 
@@ -138,18 +140,22 @@ For external ACP agents (tag = `openclaw`, `codex`, etc.), additional fields are
 
 ```yaml
 - id: ext1
-  expert: "openclaw#ext#my_agent"
+  expert: "openclaw#ext#my_agent"     # 必须使用short name格式：tag#ext#id
   api_url: "http://127.0.0.1:23001"
   api_key: "****"
-  model: "agent:my_agent"
+  model: "agent:my_agent"              # 支持session扩展：agent:name 或 agent:name:session
 ```
 
-**Session control via `model` field:**
-- `model: "agent:<name>"` — session defaults to the **team name** (recommended)
-- `model: "agent:<name>:<session>"` — explicit session, e.g. `"agent:test2:my-session"`
+**关键配置要求：**
+- **expert字段**：必须使用`tag#ext#id`格式（tag可以是openclaw、codex等）
+- **model字段**：支持两种形式：
+  - `agent:<name>` - 默认使用团队名称作为session
+  - `agent:<name>:<session>` - 显式指定session名称
 
-The `<name>` in model is ignored for routing (real name comes from `external_agents.json` `global_name`).  
-Session determines conversation isolation: same session = shared context, different session = separate context.
+**Session控制说明：**
+- 相同session共享上下文，不同session保持独立
+- model字段中的`<name>`仅用于路由，实际agent名称来自`external_agents.json`的`global_name`字段
+- session决定对话隔离：相同session = 共享上下文，不同session = 独立上下文
 
 ---
 
@@ -159,9 +165,9 @@ All step types require an `id` field.
 
 | Step Type | Key | Description |
 |-----------|-----|-------------|
-| Expert | `expert: "name"` | Single expert speaks |
-| Parallel | `parallel: [...]` | Multiple experts speak simultaneously |
-| All Experts | `all_experts: true` | Everyone speaks at once |
+| Persona | `expert: "name"` | Single persona speaks |
+| Parallel | `parallel: [...]` | Multiple personas speak simultaneously |
+| All Personas | `all_experts: true` | Everyone speaks at once |
 | Manual | `manual: {author, content}` | Inject fixed text (no LLM call) |
 | Selector | `selector: true` + `expert` | LLM-powered routing node (any expert format) |
 
@@ -192,7 +198,7 @@ Manual nodes support special `author` values for workflow control:
 
 ### 6.1 Simple Sequential Pipeline
 
-Three experts discuss in sequence:
+Three personas discuss in sequence:
 
 ```yaml
 version: 2
@@ -216,7 +222,7 @@ graph LR
 
 ### 6.2 Fan-in Parallel → Merge
 
-Two experts work in parallel, then a synthesizer merges their outputs:
+Two personas work in parallel, then a synthesizer merges their outputs:
 
 ```yaml
 version: 2
@@ -280,7 +286,7 @@ graph LR
 
 ### 6.4 Mixed Pipeline with External Agent
 
-Combines internal experts, an external OpenClaw agent, and a selector:
+Combines internal personas, an external OpenClaw agent, and a selector:
 
 ```yaml
 version: 2
@@ -454,7 +460,7 @@ uv run scripts/cli.py topics watch --topic-id <TOPIC_ID>
 1. **Maximize parallelism**: Nodes with no dependency relationship should run concurrently. Use fan-in/fan-out patterns.
 2. **Use selectors for loops**: When you need iterative refinement, use a selector node to decide whether to loop or exit.
 3. **Begin/End markers**: Use `manual` nodes with `author: begin` and `author: bend` to clearly mark workflow boundaries.
-4. **Stateful for complex tasks**: Use `#oasis#` mode for experts that need memory across rounds (e.g., a coder maintaining context).
-5. **Stateless for debates**: Use `#temp#` mode for lightweight discussion experts where memory is not needed.
+4. **Stateful for complex tasks**: Use `#oasis#` mode for personas that need memory across rounds (e.g., a coder maintaining context).
+5. **Stateless for debates**: Use `#temp#` mode for lightweight discussion personas where memory is not needed.
 6. **External agents for specialized work**: Use `#ext#` for delegating to other OpenClaw agents or external APIs with their own tools.
 7. **Edge ordering**: Selector node outgoing edges should be defined in `selector_edges`, not in regular `edges`.

@@ -68,11 +68,11 @@ uv run scripts/cli.py internal-agents add \
   --data '{"session":"<SESSION_ID>","meta":{"name":"<AGENT_NAME>","tag":"<TAG>"}}'
 ```
 
-Example - Add a creative expert:
+Example - Add a creative persona:
 ```bash
 uv run scripts/cli.py internal-agents add \
   --team demo_team \
-  --data '{"session":"creative_s1","meta":{"name":"创意专家","tag":"creative"}}'
+  --data '{"session":"creative_s1","meta":{"name":"创意人设","tag":"creative"}}'
 ```
 
 **List Internal Agents in a Team:**
@@ -224,17 +224,19 @@ uv run scripts/cli.py teams add-ext-member \
 
 ---
 
-## 4. Create Custom Expert
+## 4. Create Custom Persona
 
-When public experts don't meet your needs, you can create custom experts for your team.
+When public personas don't meet your needs, you can create custom personas (人设) for your team.
 
-### 4.1 Create a Custom Expert
+> **Note:** In YAML and CLI, the field/command name is `expert`, but it represents a **persona (人设)** — an **expert persona prompt** that defines an Agent's role, personality, and capabilities. It is NOT a separate agent. The team-level file `oasis_experts.json` is essentially a **persona prompt collection** — each entry is a prompt, not an agent.
+
+### 4.1 Create a Custom Persona
 
 **Command:**
 ```bash
-uv run scripts/cli.py experts add \
-  --tag <EXPERT_TAG> \
-  --expert-name "<EXPERT_DISPLAY_NAME>" \
+uv run scripts/cli.py personas add \
+  --tag <PERSONA_TAG> \
+  --persona-name "<PERSONA_DISPLAY_NAME>" \
   --persona "<PERSONA_DESCRIPTION>" \
   --temperature <TEMPERATURE_VALUE> \
   [--team <TEAM_NAME>]
@@ -244,39 +246,37 @@ uv run scripts/cli.py experts add \
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `--tag` | Yes | Unique identifier for the expert (e.g., `coder`, `architect`) |
-| `--expert-name` | Yes | Display name with emoji (e.g., `"💻 代码专家"`) |
-| `--persona` | Yes | System prompt defining the expert's role, skills, and behavior |
+| `--tag` | Yes | Unique identifier for the persona (e.g., `coder`, `architect`) |
+| `--persona-name` | Yes | Display name with emoji (e.g., `"💻 代码达人"`) |
+| `--persona` | Yes | System prompt defining the persona's role, skills, and behavior |
 | `--temperature` | Yes | Creativity level (0.0-1.0), lower = more deterministic |
-| `--team` | No | Associate expert with a specific team (optional) |
+| `--team` | No | Associate persona with a specific team (optional) |
 
-**Example - Create a coder expert:**
+**Example - Create a coder persona:**
 ```bash
-uv run scripts/cli.py experts add \
+uv run scripts/cli.py personas add \
   --tag coder \
-  --expert-name "💻 代码专家" \
-  --persona "You are an expert programmer proficient in multiple programming languages. You write clean, efficient, and well-documented code. You follow best practices, design patterns, and coding standards. You can debug complex issues, optimize performance, and provide code reviews." \
+  --persona-name "💻 代码达人"  --persona "You are an expert programmer proficient in multiple programming languages. You write clean, efficient, and well-documented code. You follow best practices, design patterns, and coding standards. You can debug complex issues, optimize performance, and provide code reviews." \
   --temperature 0.3
 ```
 
-**Example - Create an architect expert for a specific team:**
+**Example - Create an architect persona for a specific team:**
 ```bash
-uv run scripts/cli.py experts add \
+uv run scripts/cli.py personas add \
   --tag architect \
-  --expert-name "🏗️ 架构师" \
-  --persona "You are an experienced software architect with deep expertise in system design, microservices, cloud-native architecture, and scalability patterns. You provide high-level technical guidance and help teams make informed decisions about technology stacks." \
+  --persona-name "🏗️ 架构师"  --persona "You are an experienced software architect with deep expertise in system design, microservices, cloud-native architecture, and scalability patterns. You provide high-level technical guidance and help teams make informed decisions about technology stacks." \
   --temperature 0.4 \
   --team demo_team
 ```
 
-### 4.2 Add Custom Expert to Team
+### 4.2 Add Custom Persona to Team
 
-After creating a custom expert, add it as an Internal Agent:
+After creating a custom persona, add it as an Internal Agent:
 
 ```bash
 uv run scripts/cli.py internal-agents add \
   --team <TEAM_NAME> \
-  --data '{"session":"<SESSION_ID>","meta":{"name":"<AGENT_NAME>","tag":"<EXPERT_TAG>"}}'
+  --data '{"session":"<SESSION_ID>","meta":{"name":"<AGENT_NAME>","tag":"<PERSONA_TAG>"}}'
 ```
 
 **Example:**
@@ -288,18 +288,18 @@ uv run scripts/cli.py internal-agents add \
 
 ---
 
-## 6. View Public Expert List
+## 6. View Public Persona List
 
 ```bash
-uv run scripts/cli.py experts list
+uv run scripts/cli.py personas list
 ```
 
-### Core Public Experts (10)
+### Core Public Personas (10)
 
 | Name | Tag |
 |------|-----|
-| 🎨 创意专家 | `creative` |
-| 🔍 批判专家 | `critical` |
+| 🎨 创意人设 | `creative` |
+| 🔍 批判人设 | `critical` |
 | 📊 数据分析师 | `data` |
 | 🎯 综合顾问 | `synthesis` |
 | 📈 经济学家 | `economist` |
@@ -309,7 +309,7 @@ uv run scripts/cli.py experts list
 | 🚀 创新企业家 | `entrepreneur` |
 | 🧑 普通人 | `common_person` |
 
-### Agency Professional Experts (68)
+### Agency Professional Personas (68)
 
 | Category | Count | Examples |
 |----------|-------|----------|
@@ -323,7 +323,7 @@ uv run scripts/cli.py experts list
 | 🛡️ Support | 6 | Finance Tracker, Legal Compliance Checker, Infrastructure Maintainer... |
 | 🧪 Testing | 8 | API Tester, Performance Benchmarker, Accessibility Auditor... |
 
-### Custom Experts (8)
+### Custom Personas (8)
 
 | Name | Tag |
 |------|-----|
@@ -346,18 +346,18 @@ Below is a complete example of building a team from scratch:
 # Step 1: Create a new team
 uv run scripts/cli.py teams create --team-name demo_team
 
-# Step 2: View available public experts
-uv run scripts/cli.py experts list
+# Step 2: View available public personas
+uv run scripts/cli.py personas list
 
-# Step 3: Add Internal Agent (creative expert)
+# Step 3: Add Internal Agent (creative persona)
 uv run scripts/cli.py internal-agents add \
   --team demo_team \
-  --data '{"session":"creative_s1","meta":{"name":"创意专家","tag":"creative"}}'
+  --data '{"session":"creative_s1","meta":{"name":"创意人设","tag":"creative"}}'
 
-# Step 4: Add Internal Agent (critical expert)
+# Step 4: Add Internal Agent (critical persona)
 uv run scripts/cli.py internal-agents add \
   --team demo_team \
-  --data '{"session":"critical_s1","meta":{"name":"批判专家","tag":"critical"}}'
+  --data '{"session":"critical_s1","meta":{"name":"批判人设","tag":"critical"}}'
 
 # Step 5: Add External Member (OpenClaw agent)
 uv run scripts/cli.py teams add-ext-member \
@@ -382,7 +382,7 @@ uv run scripts/cli.py teams members --team-name demo_team
 ## 8. Tips & Notes
 
 - **Team name duplication**: If a team name already exists, the create command will report an error. Use `teams list` to check first.
-- **Tag matching**: When adding public experts as Internal Agents, the `tag` field must match the expert's tag exactly (e.g., `creative`, `critical`).
+- **Tag matching**: When adding public personas as Internal Agents, the `tag` field must match the persona's tag exactly (e.g., `creative`, `critical`).
 - **Session ID**: Each Internal Agent in a team needs a unique `session` ID. Use descriptive names like `creative_s1` for easy identification.
 - **Multiple agent types**: A single team can contain a mix of Internal, OpenClaw, and External agents.
 - **Required fields for External Members**: `name` and `global_name` are required. Keep them consistent to point to the same entity.
@@ -392,6 +392,6 @@ uv run scripts/cli.py teams members --team-name demo_team
 ## 8. Summary
 
 The core workflow for building a TeamClaw team using CLI is:
-**Create Team → Add Members (Internal/OpenClaw/External) → Verify**.
+**Create Team → Add Members (Internal/OpenClaw/External) → Add Personas → Verify**.
 
 All operations are based on `scripts/cli.py`, ensure execution under `uv run` environment.

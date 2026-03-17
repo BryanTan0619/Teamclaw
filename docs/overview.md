@@ -7,7 +7,7 @@ This page holds the higher-level product information that does not need to live 
 TeamClaw is an OpenAI-compatible AI agent system with:
 
 - a local `/v1/chat/completions` endpoint
-- a built-in multi-expert orchestration engine called OASIS
+- a built-in multi-persona orchestration engine called OASIS
 - lightweight built-in agents for files, commands, and messaging
 - optional integrations such as OpenClaw, Telegram, QQ, and Cloudflare Tunnel
 
@@ -18,14 +18,14 @@ TeamClaw is an OpenAI-compatible AI agent system with:
 A Team combines:
 
 - agents
-- experts / prompts
+- personas (expert persona prompts — special prompts that define identity, not separate agents)
 - workflows
 
 This lets TeamClaw move beyond single-agent chat into structured collaboration.
 
 ### OASIS
 
-OASIS is the workflow engine behind coordinated expert discussions and execution flows. It supports:
+OASIS is the workflow engine behind coordinated persona-driven discussions and execution flows. It supports:
 
 - sequential steps
 - parallel branches
@@ -48,9 +48,9 @@ OASIS is the workflow engine behind coordinated expert discussions and execution
 
 Run TeamClaw on your own machine and use the local Web UI or the OpenAI-compatible API.
 
-### Multi-expert orchestration
+### Multi-persona orchestration
 
-Create teams of experts and define workflows that debate, vote, summarize, or execute staged tasks.
+Create teams of personas and define workflows that debate, vote, summarize, or execute staged tasks.
 
 ### Integration hub
 

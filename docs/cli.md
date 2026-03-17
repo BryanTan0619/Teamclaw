@@ -49,7 +49,7 @@ uv run scripts/cli.py [-u USER] <子命令> [参数...]
 16. [internal-agents](#16-internal-agents) — 内部 Agent CRUD
 17. [teams](#17-teams) — Team 管理
 18. [topics](#18-topics) — OASIS 话题管理
-19. [experts](#19-experts) — 专家列表
+19. [personas](#19-personas) — 人设管理
 20. [workflows](#20-workflows) — Workflow 查看
 21. [tunnel](#21-tunnel) — Cloudflare Tunnel 管理
 22. [status](#22-status) — 服务状态检查
@@ -374,12 +374,12 @@ uv run scripts/cli.py -u Avalon_01 openclaw-snapshot restore-all --team myteam
 **可视化编排管理**
 
 ```bash
-# 专家列表
-uv run scripts/cli.py -u Avalon_01 visual experts --team myteam
+# 人设列表
+uv run scripts/cli.py -u Avalon_01 visual personas --team myteam
 
-# 添加/删除自定义专家
-uv run scripts/cli.py -u Avalon_01 visual add-expert --data '{"tag":"myexpert","name":"我的专家","prompt":"..."}' --team myteam
-uv run scripts/cli.py -u Avalon_01 visual delete-expert --tag myexpert --team myteam
+# 添加/删除自定义人设
+uv run scripts/cli.py -u Avalon_01 visual add-persona --data '{"tag":"myexpert","name":"我的人设","prompt":"..."}' --team myteam
+uv run scripts/cli.py -u Avalon_01 visual delete-persona --tag myexpert --team myteam
 
 # 生成 YAML
 uv run scripts/cli.py -u Avalon_01 visual generate-yaml --data '{"nodes":[...],"edges":[...]}' --team myteam
@@ -401,9 +401,9 @@ uv run scripts/cli.py -u Avalon_01 visual sessions-status
 
 | 参数 | 说明 | 必填 | 默认值 |
 |------|------|------|--------|
-| `action` | 操作 | ❌ | `experts` |
+| `action` | 操作 | ❌ | `personas` |
 | `--team` | Team 名称 | ❌ | — |
-| `--tag` | 专家 tag | delete-expert 时 | — |
+| `--tag` | 人设 tag | delete-persona 时 | — |
 | `--name` | 布局名称 | load/delete 时 | — |
 | `--data` | JSON 数据 | 视操作 | — |
 
@@ -446,7 +446,7 @@ uv run scripts/cli.py -u Avalon_01 internal-agents delete --sid s1 --team myteam
 # 团队列表
 uv run scripts/cli.py -u Avalon_01 teams
 
-# 🆕 一次性查看 team 完整信息（聚合成员、专家、workflows、话题等）
+# 🆕 一次性查看 team 完整信息（聚合成员、人设、workflows、话题等）
 uv run scripts/cli.py -u Avalon_01 teams info --team-name team2
 
 # 创建 / 删除团队
@@ -459,11 +459,11 @@ uv run scripts/cli.py -u Avalon_01 teams add-ext-member --team-name myteam --dat
 uv run scripts/cli.py -u Avalon_01 teams update-ext-member --team-name myteam --data '{"user_id":"bob","role":"admin"}'
 uv run scripts/cli.py -u Avalon_01 teams delete-ext-member --team-name myteam --data '{"user_id":"bob"}'
 
-# 团队专家管理
-uv run scripts/cli.py -u Avalon_01 teams experts --team-name myteam
-uv run scripts/cli.py -u Avalon_01 teams add-expert --team-name myteam --data '{"tag":"myexpert","name":"...","prompt":"..."}'
-uv run scripts/cli.py -u Avalon_01 teams update-expert --team-name myteam --tag myexpert --data '{"name":"..."}'
-uv run scripts/cli.py -u Avalon_01 teams delete-expert --team-name myteam --tag myexpert
+# 团队人设管理
+uv run scripts/cli.py -u Avalon_01 teams personas --team-name myteam
+uv run scripts/cli.py -u Avalon_01 teams add-persona --team-name myteam --data '{"tag":"myexpert","name":"...","prompt":"..."}'
+uv run scripts/cli.py -u Avalon_01 teams update-persona --team-name myteam --tag myexpert --data '{"name":"..."}'
+uv run scripts/cli.py -u Avalon_01 teams delete-persona --team-name myteam --tag myexpert
 
 # 团队快照
 uv run scripts/cli.py -u Avalon_01 teams snapshot-download --team-name myteam -o snapshot.zip
@@ -474,12 +474,12 @@ uv run scripts/cli.py -u Avalon_01 teams snapshot-upload --team-name myteam --fi
 |------|------|------|--------|
 | `action` | 操作 (`list`, `info`, `create`, `delete`, `members`, ...) | ❌ | `list` |
 | `--team-name` | Team 名称 | 视操作 | — |
-| `--tag` | 专家 tag | update/delete-expert 时 | — |
+| `--tag` | 人设 tag | update-persona/delete-persona 时 | — |
 | `--data` | JSON 数据 | 视操作 | — |
 | `-o`, `--output` | 输出文件路径 | ❌ | `team_{name}_snapshot.zip` |
 | `--file` | 上传文件路径 | snapshot-upload 时 | — |
 
-> 💡 **`info` 命令**：一次性聚合调用多个 API（成员、专家、workflows、话题、OpenClaw 快照），美化输出该 team 的完整信息快照，不直接对应单个接口。
+> 💡 **`info` 命令**：一次性聚合调用多个 API（成员、人设、workflows、话题、OpenClaw 快照），美化输出该 team 的完整信息快照，不直接对应单个接口。
 
 ---
 
@@ -523,34 +523,35 @@ uv run scripts/cli.py topics delete-all
 > - `conclusion` (在 workflows 子命令中) — 阻塞等待直到讨论结束并返回结论
 
 
-## 19. experts
+## 19. personas
 
-**OASIS 专家管理**
+**OASIS 人设管理**
+
+> **Note:** `personas` 命令管理"人设"(persona)——即 **expert persona prompt**，一种定义 Agent 角色、性格和能力的特殊提示词配置，而非一个独立的 agent。团队目录下的 `oasis_experts.json` 就是这些 persona prompt 的集合文件。
 
 ```bash
-# 列出专家
-uv run scripts/cli.py -u Avalon_01 experts
-uv run scripts/cli.py -u Avalon_01 experts list
-uv run scripts/cli.py -u Avalon_01 experts list --team team2
+# 列出人设
+uv run scripts/cli.py -u Avalon_01 personas
+uv run scripts/cli.py -u Avalon_01 personas list
+uv run scripts/cli.py -u Avalon_01 personas list --team team2
 
-# 添加自定义专家
-uv run scripts/cli.py -u Avalon_01 experts add --tag my_analyst --expert-name "数据分析师" --persona "你是资深数据分析专家"
-uv run scripts/cli.py -u Avalon_01 experts add --tag my_lawyer --expert-name "法律顾问" --persona "你是法律专家" --team team2
+# 添加自定义人设
+uv run scripts/cli.py -u Avalon_01 personas add --tag my_analyst --persona-name "数据分析师" --persona "你是资深数据分析师"
+uv run scripts/cli.py -u Avalon_01 personas add --tag my_lawyer --persona-name "法律顾问" --persona "你是法律顾问" --team team2
 
-# 更新专家
-uv run scripts/cli.py -u Avalon_01 experts update --tag my_analyst --persona "你是AI数据分析专家，擅长深度学习"
+# 更新人设
+uv run scripts/cli.py -u Avalon_01 personas update --tag my_analyst --persona "你是AI数据分析师，擅长深度学习"
 
-# 删除专家
-uv run scripts/cli.py -u Avalon_01 experts delete --tag my_analyst
-uv run scripts/cli.py -u Avalon_01 experts delete --tag my_lawyer --team team2
+# 删除人设
+uv run scripts/cli.py -u Avalon_01 personas delete --tag my_analyst
+uv run scripts/cli.py -u Avalon_01 personas delete --tag my_lawyer --team team2
 ```
-
 | 参数 | 说明 | 必填 | 默认值 |
 |------|------|------|--------|
 | `action` | 操作 | ❌ | `list` |
-| `--tag` | 专家标签（唯一标识） | add/update/delete 时 ✅ | — |
-| `--expert-name` | 专家显示名称 | add 时 ✅ | — |
-| `--persona` | 专家人设描述 | ❌ | — |
+| `--tag` | 人设标签（唯一标识） | add/update/delete 时 ✅ | — |
+| `--persona-name` | 人设显示名称 | add 时 ✅ | — |
+| `--persona` | 人设描述 | ❌ | — |
 | `--temperature` | 温度参数 (0-2) | ❌ | 0.7 |
 | `--team` | Team 名称 | ❌ | — |
 

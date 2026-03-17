@@ -40,7 +40,7 @@
 
 - **文件**：`oasis/server.py`
 - **职责**：
-  - 多专家讨论引擎（Topics / Experts / Sessions）
+  - 多人设讨论引擎（Topics / Experts / Sessions）
   - OpenClaw 快照管理
   - `/publicnet/info` 公网信息查询
   - Agent 管理与编排中心（迁移中）
@@ -177,7 +177,7 @@ PORT_FRONTEND=51209
 - `POST /proxy_oasis/topics/<id>/cancel` — 取消讨论
 - `POST /proxy_oasis/topics/<id>/purge` — 清除话题
 - `DELETE /proxy_oasis/topics` — 删除话题
-- `GET /proxy_oasis/experts` — 专家列表
+- `GET /proxy_oasis/experts` — 人设列表
 
 ### OpenClaw 代理（→ :51202）
 
@@ -207,9 +207,9 @@ PORT_FRONTEND=51209
 
 ### 可视化编排代理（本地处理 / → :51202）
 
-- `GET /proxy_visual/experts` — 专家列表（含自定义）
-- `POST /proxy_visual/experts/custom` — 添加自定义专家
-- `DELETE /proxy_visual/experts/custom/<tag>` — 删除自定义专家
+- `GET /proxy_visual/experts` — 人设 prompt 列表（含自定义）
+- `POST /proxy_visual/experts/custom` — 添加自定义人设 prompt
+- `DELETE /proxy_visual/experts/custom/<tag>` — 删除自定义人设 prompt
 - `POST /proxy_visual/generate-yaml` — 生成 YAML 工作流
 - `POST /proxy_visual/agent-generate-yaml` — AI 生成 YAML
 - `POST /proxy_visual/save-layout` — 保存布局
@@ -242,10 +242,10 @@ PORT_FRONTEND=51209
 - `POST /teams/<name>/members/external` — 添加外部成员
 - `DELETE /teams/<name>/members/external` — 移除外部成员
 - `PUT /teams/<name>/members/external` — 更新外部成员
-- `GET /teams/<name>/experts` — 团队专家列表
-- `POST /teams/<name>/experts` — 添加团队专家
-- `PUT /teams/<name>/experts/<tag>` — 更新团队专家
-- `DELETE /teams/<name>/experts/<tag>` — 删除团队专家
+- `GET /teams/<name>/experts` — 团队人设 prompt 列表
+- `POST /teams/<name>/experts` — 添加团队人设 prompt
+- `PUT /teams/<name>/experts/<tag>` — 更新团队人设 prompt
+- `DELETE /teams/<name>/experts/<tag>` — 删除团队人设 prompt
 - `POST /teams/snapshot/download` — 下载团队快照
 - `POST /teams/snapshot/upload` — 上传团队快照
 

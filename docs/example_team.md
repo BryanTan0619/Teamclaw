@@ -9,7 +9,7 @@ This document describes the folder structure and file contents of an example tea
 demo_team/
 ├── external_agents.json          # External agent definitions (OpenClaw agents, custom API agents, etc.)
 ├── internal_agents.json          # Internal agent (expert) session bindings
-├── oasis_experts.json            # Expert persona definitions (name, persona prompt, temperature)
+├── oasis_experts.json            # Persona prompt collection (expert persona prompts, NOT agents)
 └── oasis/
     └── yaml/
         ├── demo_team_workflow.yaml       # Main team workflow (OASIS orchestration)
@@ -86,12 +86,12 @@ Defines internal agents (experts) and their session bindings. Each entry has a `
 ```json
 [
   {
-    "name": "创意专家",
+    "name": "创意人设",
     "tag": "creative",
     "session": "creative_s1"
   },
   {
-    "name": "批判专家",
+    "name": "批判人设",
     "tag": "critical",
     "session": "critical_s1"
   },
@@ -122,7 +122,7 @@ Defines internal agents (experts) and their session bindings. Each entry has a `
 
 ### oasis_experts.json
 
-Defines expert personas with detailed system prompts and temperature settings. These personas are referenced by internal agents via matching `tag`.
+A **persona prompt collection** — each entry is an **expert persona prompt** (not a separate agent) that defines an Agent's identity, personality, and capabilities via a system prompt. Internal agents reference these persona prompts via matching `tag`.
 
 ```json
 [
@@ -255,7 +255,7 @@ graph LR
 ## Notes
 
 - **Runtime fields**: `session` (in internal_agents.json) and `global_name` (in external_agents.json) are runtime-only fields. They are automatically stripped during team snapshot export/download and regenerated on import/restore.
-- **Expert matching**: Internal agents reference expert personas via the `tag` field. An internal agent with `"tag": "architect"` will use the persona defined in oasis_experts.json with the same tag.
+- **Persona prompt matching**: Internal agents reference persona prompts via the `tag` field. An internal agent with `"tag": "architect"` will use the persona prompt defined in `oasis_experts.json` with the same tag. Remember: `oasis_experts.json` is a prompt collection, not an agent registry.
 - **Workflow node types**:
   - `expert: <tag>#oasis#<name>` — Uses a named OASIS expert persona
   - `expert: <tag>#temp#<temperature>` — Uses a temporary expert with specified temperature
