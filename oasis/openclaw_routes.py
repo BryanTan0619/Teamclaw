@@ -41,10 +41,22 @@ _OPENCLAW_CORE_FILES = [
 ]
 
 _OPENCLAW_TOOL_GROUPS = {
-    "code": {"description": "Code editing (Read/Write/Edit)"},
-    "terminal": {"description": "Terminal / shell commands"},
-    "browser": {"description": "Web browser access"},
-    "mcp": {"description": "MCP server tools"},
+    "code": {
+        "description": "Code editing (Read/Write/Edit)",
+        "tools": ["read", "write", "edit", "apply_patch", "nodes"],
+    },
+    "terminal": {
+        "description": "Terminal / shell commands",
+        "tools": ["exec", "bash", "process"],
+    },
+    "browser": {
+        "description": "Web browser access",
+        "tools": ["browser", "canvas", "web_search", "web_fetch"],
+    },
+    "mcp": {
+        "description": "MCP server tools",
+        "tools": ["sessions_list", "session_status"],
+    },
 }
 
 _OPENCLAW_TOOL_PROFILES = {
@@ -227,17 +239,33 @@ async def list_openclaw_workspace_files(workspace: str = Query(...)):
     ws_path = os.path.expanduser(workspace)
     if not os.path.isdir(ws_path):
         return JSONResponse({"ok": False, "error": "Workspace not found"}, status_code=404)
+    # 先以核心文件列表为基础，标注存在状态；再追加 workspace 中其余文件
+    seen = set()
     files = []
+    for core_name in _OPENCLAW_CORE_FILES:
+        core_path = os.path.join(ws_path, core_name)
+        seen.add(core_name)
+        if os.path.isfile(core_path):
+            try:
+                size = os.path.getsize(core_path)
+                files.append({"name": core_name, "exists": True, "size": size})
+            except Exception:
+                files.append({"name": core_name, "exists": False, "size": 0})
+        else:
+            files.append({"name": core_name, "exists": False, "size": 0})
+
     for item in sorted(os.listdir(ws_path)):
+        if item in seen:
+            continue
         item_path = os.path.join(ws_path, item)
         if os.path.isfile(item_path):
             try:
                 size = os.path.getsize(item_path)
-                files.append({"name": item, "size": size})
+                files.append({"name": item, "exists": True, "size": size})
             except Exception:
                 pass
         elif os.path.isdir(item_path):
-            files.append({"name": item + "/", "is_dir": True})
+            files.append({"name": item + "/", "is_dir": True, "exists": True})
     return {"ok": True, "files": files}
 
 
@@ -423,10 +451,13 @@ async def list_openclaw_skills_info():
 
 @router.get("/sessions/openclaw/tool-groups")
 async def list_openclaw_tool_groups():
-    """返回可用的工具组和配置文件（静态元数据）。"""
+    """返回可用的工具组和配置文件（静态元数据）。
+
+    groups 的值为工具名数组，前端通过 for (const tn of tools) 遍历。
+    """
     return {
         "ok": True,
-        "groups": {k: v for k, v in _OPENCLAW_TOOL_GROUPS.items()},
+        "groups": {k: v["tools"] for k, v in _OPENCLAW_TOOL_GROUPS.items()},
         "profiles": {k: v for k, v in _OPENCLAW_TOOL_PROFILES.items()},
     }
 
