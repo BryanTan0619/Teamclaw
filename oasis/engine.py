@@ -98,8 +98,12 @@ def _load_external_agents(user_id: str, team: str = "") -> list[dict]:
 def _find_external_agent_global_name(external_agents: list[dict], name: str) -> str:
     """Find the 'global_name' field from external_agents.json by agent name.
 
-    Returns the global_name string (the real ACP agent name), or "" if not found.
+    Returns the global_name string (the real ACP agent name).
+    When no team is configured (external_agents list is empty), falls back to
+    *name* itself so that ACP agents can still be created.
     """
+    if not external_agents:
+        return name
     name_lower = name.lower()
     for a in external_agents:
         if a.get("name", "").lower() == name_lower:
