@@ -671,9 +671,10 @@ def cmd_experts(args):
         data = {
             "user_id": args.user,
             "tag": args.tag,
-            "name": args.persona_name or "",
             "team": args.team or "",
         }
+        if args.persona_name:
+            data["name"] = args.persona_name
         if args.persona:
             data["persona"] = args.persona
         if args.temperature is not None:

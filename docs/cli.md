@@ -1,6 +1,6 @@
 # TeamClaw CLI 命令大全
 
-> 最后更新：2026-03-14
+> 最后更新：2026-03-17
 
 ## 运行方式
 
@@ -539,8 +539,11 @@ uv run scripts/cli.py -u Avalon_01 personas list --team team2
 uv run scripts/cli.py -u Avalon_01 personas add --tag my_analyst --persona-name "数据分析师" --persona "你是资深数据分析师"
 uv run scripts/cli.py -u Avalon_01 personas add --tag my_lawyer --persona-name "法律顾问" --persona "你是法律顾问" --team team2
 
-# 更新人设
+# 更新人设（仅更新 persona，name 保持不变）
 uv run scripts/cli.py -u Avalon_01 personas update --tag my_analyst --persona "你是AI数据分析师，擅长深度学习"
+
+# 更新人设（同时修改 name）
+uv run scripts/cli.py -u Avalon_01 personas update --tag my_analyst --persona-name "高级分析师" --persona "你是AI数据分析师"
 
 # 删除人设
 uv run scripts/cli.py -u Avalon_01 personas delete --tag my_analyst
@@ -550,7 +553,7 @@ uv run scripts/cli.py -u Avalon_01 personas delete --tag my_lawyer --team team2
 |------|------|------|--------|
 | `action` | 操作 | ❌ | `list` |
 | `--tag` | 人设标签（唯一标识） | add/update/delete 时 ✅ | — |
-| `--persona-name` | 人设显示名称 | add 时 ✅ | — |
+| `--persona-name` | 人设显示名称 | add 时 ✅，update 时可选（不传则保持原值） | — |
 | `--persona` | 人设描述 | ❌ | — |
 | `--temperature` | 温度参数 (0-2) | ❌ | 0.7 |
 | `--team` | Team 名称 | ❌ | — |

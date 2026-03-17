@@ -2101,8 +2101,10 @@ def delete_team(team_name):
             sid = agent.get("session")
             if sid:
                 try:
-                    r = requests.delete(
-                        f"{OASIS_BASE_URL}/sessions/{sid}",
+                    r = requests.post(
+                        LOCAL_DELETE_SESSION_URL,
+                        json={"user_id": user_id, "session_id": sid},
+                        headers={"X-Internal-Token": INTERNAL_TOKEN},
                         timeout=10
                     )
                     if r.status_code == 200:

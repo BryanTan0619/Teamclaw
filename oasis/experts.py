@@ -194,9 +194,12 @@ def add_user_expert(user_id: str, data: dict) -> dict:
 def update_user_expert(user_id: str, tag: str, data: dict) -> dict:
     """Update an existing custom expert by tag. Returns the updated dict."""
     experts = load_user_experts(user_id)
+    # 过滤掉空字符串值的可选字段，避免覆盖已有值
+    _skip = {"user_id", "team", "tag"}
+    patch = {k: v for k, v in data.items() if k not in _skip and v not in ("", None)}
     for i, e in enumerate(experts):
         if e["tag"] == tag:
-            updated = _validate_expert({**e, **data, "tag": tag})
+            updated = _validate_expert({**e, **patch, "tag": tag})
             experts[i] = updated
             _save_user_experts(user_id, experts)
             return updated
@@ -255,9 +258,12 @@ def add_team_expert(user_id: str, team: str, data: dict) -> dict:
 def update_team_expert(user_id: str, team: str, tag: str, data: dict) -> dict:
     """Update an existing team expert by tag. Returns the updated dict."""
     experts = load_team_experts(user_id, team)
+    # 过滤掉空字符串值的可选字段，避免覆盖已有值
+    _skip = {"user_id", "team", "tag"}
+    patch = {k: v for k, v in data.items() if k not in _skip and v not in ("", None)}
     for i, e in enumerate(experts):
         if e["tag"] == tag:
-            updated = _validate_expert({**e, **data, "tag": tag})
+            updated = _validate_expert({**e, **patch, "tag": tag})
             experts[i] = updated
             _save_team_experts(user_id, team, experts)
             return updated
