@@ -7,8 +7,11 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from auth_utils import extract_user_password_session, is_internal_bearer, parse_bearer_parts
+from logging_utils import get_logger
 from openai_models import ChatCompletionRequest, ChatMessage, OpenAIExecutionContext
 from openai_protocol import OpenAIProtocolHelper
+
+logger = get_logger("openai_service")
 
 
 class OpenAIChatService:
@@ -182,6 +185,7 @@ class OpenAIChatService:
         try:
             result = await task
         except asyncio.CancelledError:
+            logger.info("non-stream cancelled user=%s session=%s", ctx.user_id, ctx.session_id)
             await self._patch_cancelled_tool_calls(ctx.config)
             return self.make_openai_response("⚠️ 已终止", model=ctx.model_name)
         finally:
@@ -374,6 +378,9 @@ class OpenAIChatService:
             external_tool_names=external_tool_names,
             thread_lock=thread_lock,
         )
+
+        logger.info("chat user=%s session=%s stream=%s model=%s",
+                    user_id, session_id, req.stream, model_name)
 
         if not req.stream:
             return await self._run_non_stream(ctx)

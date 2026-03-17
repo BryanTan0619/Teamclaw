@@ -7,6 +7,7 @@ from checkpoint_repository import (
     delete_thread_records_like,
     list_thread_ids_by_prefix,
 )
+from logging_utils import get_logger
 from session_models import (
     DeleteSessionRequest,
     SessionHistoryRequest,
@@ -14,6 +15,8 @@ from session_models import (
     SessionStatusRequest,
 )
 from session_summary import build_session_summary
+
+logger = get_logger("session_service")
 
 
 class SessionService:
@@ -32,6 +35,7 @@ class SessionService:
 
     async def list_sessions(self, req: SessionListRequest, x_internal_token: str | None):
         self.verify_auth_or_token(req.user_id, req.password, x_internal_token)
+        logger.info("list_sessions user=%s", req.user_id)
 
         prefix = f"{req.user_id}#"
         sessions = []
@@ -129,6 +133,7 @@ class SessionService:
 
     async def delete_session(self, req: DeleteSessionRequest, x_internal_token: str | None):
         self.verify_auth_or_token(req.user_id, req.password, x_internal_token)
+        logger.info("delete_session user=%s session=%s", req.user_id, req.session_id or "ALL")
 
         try:
             if req.session_id:

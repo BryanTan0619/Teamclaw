@@ -112,7 +112,10 @@ Use layered boundaries per service:
   - All OpenClaw routes (`/sessions/openclaw/*`, 14 endpoints) extracted to `oasis/openclaw_routes.py` using `APIRouter`.
   - `oasis/server.py` reduced from 1803 to 876 lines, now focused on topic/expert/workflow domains.
   - OpenClaw routes initialized via `init_openclaw_routes()` with explicit dependency injection.
-- Phase 5 in progress:
-  - Unit tests added for core refactored components: `test/test_agent_runtime_state.py` (12 tests), `test/test_openai_protocol.py` (19 tests).
-  - Structured logging via `logging_utils.py` adopted in main chain modules.
-  - Remaining: request ID propagation, integration tests for end-to-end flows, migration/rollback playbook.
+- Phase 5 ✅ done:
+  - Request ID propagation: `RequestIdMiddleware` in `mainagent.py` extracts/generates `X-Request-Id`, propagated via `contextvars` to all service-layer loggers.
+  - Log format updated to include `[req:%(request_id)s]` in every log line via `logging_utils.py` filter.
+  - Structured logging added to `openai_service`, `session_service`, `ops_service` (key operations: chat, login, cancel, session list/delete).
+  - Unit tests: `test/test_agent_runtime_state.py` (12 tests), `test/test_openai_protocol.py` (19 tests).
+  - Integration tests: `test/test_integration.py` (20 tests) covering Agent (sessions, settings, models, chat, request ID), OASIS (topics, experts, openclaw), Frontend (page access), and cross-service lifecycle.
+  - Migration/rollback playbook: `docs/migration-playbook.md` with pre-checks, step-by-step migration, quick rollback, data recovery, and verification checklist.

@@ -6,7 +6,10 @@ from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
 from auth_utils import extract_user_password_session, is_internal_bearer, parse_bearer_parts
+from logging_utils import get_logger
 from ops_models import CancelRequest, LoginRequest, TTSRequest
+
+logger = get_logger("ops_service")
 
 
 class OpsService:
@@ -37,12 +40,15 @@ class OpsService:
 
     async def login(self, req: LoginRequest):
         if self.verify_password(req.user_id, req.password):
+            logger.info("login success user=%s", req.user_id)
             return {"status": "success", "message": "登录成功"}
+        logger.warning("login failed user=%s", req.user_id)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     async def cancel_agent(self, req: CancelRequest, x_internal_token: str | None):
         self.verify_auth_or_token(req.user_id, req.password, x_internal_token)
         task_key = f"{req.user_id}#{req.session_id}"
+        logger.info("cancel user=%s session=%s", req.user_id, req.session_id)
         await self.agent.cancel_task(task_key)
         return {"status": "success", "message": "已终止"}
 

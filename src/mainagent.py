@@ -1,9 +1,11 @@
 import os
 import secrets
+import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 import uvicorn
 
 from dotenv import load_dotenv
@@ -22,12 +24,27 @@ from session_routes import create_session_router
 from settings_routes import create_settings_router
 from system_routes import create_system_router
 from message_builder import build_human_message
-from logging_utils import get_logger
+from logging_utils import get_logger, request_id_ctx
 
 # --- Path setup ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(current_dir)
 logger = get_logger("mainagent")
+
+
+# --- Request ID Middleware ---
+class RequestIdMiddleware(BaseHTTPMiddleware):
+    """为每个请求生成或传播 X-Request-Id，并注入日志上下文。"""
+
+    async def dispatch(self, request: Request, call_next):
+        req_id = request.headers.get("X-Request-Id") or uuid.uuid4().hex[:12]
+        token = request_id_ctx.set(req_id)
+        try:
+            response: Response = await call_next(request)
+            response.headers["X-Request-Id"] = req_id
+            return response
+        finally:
+            request_id_ctx.reset(token)
 
 env_path = os.path.join(root_dir, "config", ".env")
 db_path = os.path.join(root_dir, "data", "agent_memory.db")
@@ -117,6 +134,8 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
+# --- Request ID 传播 ---
+app.add_middleware(RequestIdMiddleware)
 
 app.include_router(
     create_group_router(
