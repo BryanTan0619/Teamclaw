@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from typing import Any, Callable
 
 from fastapi import HTTPException
@@ -12,6 +13,70 @@ from openai_models import ChatCompletionRequest, ChatMessage, OpenAIExecutionCon
 from openai_protocol import OpenAIProtocolHelper
 
 logger = get_logger("openai_service")
+
+# --- Agent tool whitelist ---
+_USER_FILES_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "data", "user_files",
+)
+
+
+def _get_agent_tool_whitelist(session_id: str) -> set[str] | None:
+    """根据 session_id 在所有 internal_agents.json 中查找匹配的 agent，
+    如果该 agent 配置了 tools 白名单，返回允许的工具名集合。
+
+    查找范围：
+      1. 所有用户的非 team 目录: data/user_files/*/internal_agents.json
+      2. 所有用户的 team 目录: data/user_files/*/teams/*/internal_agents.json
+
+    Returns:
+      set[str] — 白名单集合（只包含值为 true 的 key）
+      None     — 未找到匹配 agent 或该 agent 未配置 tools（不限制）
+    """
+    if not session_id or session_id == "default":
+        return None
+
+    if not os.path.isdir(_USER_FILES_DIR):
+        return None
+
+    # 收集所有可能的 internal_agents.json 路径
+    ia_files: list[str] = []
+    for user_dir_name in os.listdir(_USER_FILES_DIR):
+        user_dir = os.path.join(_USER_FILES_DIR, user_dir_name)
+        if not os.path.isdir(user_dir):
+            continue
+        user_ia = os.path.join(user_dir, "internal_agents.json")
+        if os.path.isfile(user_ia):
+            ia_files.append(user_ia)
+        # 所有用户 team 目录
+        teams_dir = os.path.join(user_dir, "teams")
+        if not os.path.isdir(teams_dir):
+            continue
+        for team_name in os.listdir(teams_dir):
+            team_ia = os.path.join(teams_dir, team_name, "internal_agents.json")
+            if os.path.isfile(team_ia):
+                ia_files.append(team_ia)
+
+    # 遍历所有文件，按 session 匹配
+    for ia_file in ia_files:
+        try:
+            with open(ia_file, "r", encoding="utf-8") as f:
+                agents_list = json.load(f)
+            if not isinstance(agents_list, list):
+                continue
+            for agent_entry in agents_list:
+                if not isinstance(agent_entry, dict):
+                    continue
+                if agent_entry.get("session") != session_id:
+                    continue
+                # 找到匹配的 agent
+                tools_cfg = agent_entry.get("tools")
+                if not isinstance(tools_cfg, dict) or not tools_cfg:
+                    return None  # 该 agent 无 tools 配置 → 不限制
+                return {k for k, v in tools_cfg.items() if v}
+        except Exception:
+            continue
+    return None
 
 
 class OpenAIChatService:
@@ -357,10 +422,21 @@ class OpenAIChatService:
         external_tool_names = self.extract_external_tool_names(req.tools)
         input_messages = self._build_input_messages(req)
 
+        # --- Agent tool whitelist filtering ---
+        agent_whitelist = _get_agent_tool_whitelist(session_id)
+        effective_enabled = req.enabled_tools
+        if agent_whitelist is not None:
+            if effective_enabled is None:
+                # 调用方未限制 → 直接用白名单
+                effective_enabled = list(agent_whitelist)
+            else:
+                # 调用方有自己的限制 → 取交集
+                effective_enabled = [t for t in effective_enabled if t in agent_whitelist]
+
         user_input = {
             "messages": input_messages,
             "trigger_source": "user",
-            "enabled_tools": req.enabled_tools,
+            "enabled_tools": effective_enabled,
             "user_id": user_id,
             "session_id": session_id,
             "external_tools": req.tools,
