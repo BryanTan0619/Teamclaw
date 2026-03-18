@@ -275,7 +275,7 @@
                 <div class="group-chat-area" id="group-chat-area">
                     <div class="group-empty-state" id="group-empty-placeholder">
                         <div class="empty-icon">💬</div>
-                        <div class="empty-text" data-i18n="group_select_hint">选择一个团队进行群聊</div>
+                        <div class="empty-text" data-i18n="group_create_hint">创建或导入一个团队进行群聊</div>
                     </div>
                     <!-- Active group chat (hidden initially) -->
                     <div id="group-active-chat" style="display:none; flex-direction:column; height:100%;">
@@ -615,7 +615,10 @@
                                     <span class="text-sm">🏆</span>
                                     <span class="text-xs font-bold text-green-800" data-i18n="oasis_conclusion">讨论结论</span>
                                 </div>
-                                <span id="oasis-conclusion-toggle" class="text-xs text-gray-400 transition-transform" style="display:inline-block;">▼</span>
+                                <div class="flex items-center space-x-2">
+                                    <button id="oasis-overview-btn" onclick="event.stopPropagation(); showDiscussionOverview()" style="font-size:10px;padding:3px 8px;border-radius:6px;cursor:pointer;background:linear-gradient(135deg,#eff6ff,#dbeafe);color:#2563eb;border:1px solid #93c5fd;font-weight:600;white-space:nowrap;" data-i18n="oasis_overview">📊 讨论概览</button>
+                                    <span id="oasis-conclusion-toggle" class="text-xs text-gray-400 transition-transform" style="display:inline-block;">▼</span>
+                                </div>
                             </div>
                             <p id="oasis-conclusion-text" class="text-xs text-gray-700 leading-relaxed mt-2"></p>
                         </div>

@@ -195,6 +195,7 @@ const i18n = {
         group_new: '+ 新建',
         group_no_groups: '暂无团队',
         group_select_hint: '选择一个团队进行群聊',
+        group_create_hint: '创建或导入一个团队进行群聊',
         group_members_btn: '👤 成员',
         group_mute: '🔇 急停',
         group_unmute: '🔊 恢复',
@@ -697,6 +698,7 @@ orch_openclaw_sessions: '🦞 OpenClaw',
         group_new: '+ New',
         group_no_groups: 'No teams',
         group_select_hint: 'Select a team to start chat',
+        group_create_hint: 'Create or import a team to start chat',
         group_members_btn: '👤 Members',
         group_mute: '🔇 Stop',
         group_unmute: '🔊 Resume',
@@ -3767,6 +3769,9 @@ async function loadTopicDetail(topicId) {
 }
 
 function renderTopicDetail(detail) {
+    // Cache detail for overview visualization
+    cacheOverviewDetail(detail);
+
     const badge = getStatusBadge(detail.status);
     document.getElementById('oasis-detail-status').className = 'oasis-status-badge ' + badge.cls;
     document.getElementById('oasis-detail-status').textContent = badge.text;
@@ -3778,6 +3783,11 @@ function renderTopicDetail(detail) {
     const actionsEl = document.getElementById('oasis-detail-actions');
     const isRunning = detail.status === 'discussing' || detail.status === 'pending';
     let btns = '';
+    // Always show overview button when there is data
+    const hasData = (detail.posts && detail.posts.length > 0) || (detail.timeline && detail.timeline.length > 0);
+    if (hasData) {
+        btns += `<button onclick="showDiscussionOverview()" class="oasis-detail-action-btn overview" style="background:linear-gradient(135deg,#eff6ff,#dbeafe);color:#2563eb;border:1px solid #93c5fd;">📊 ${currentLang==='zh-CN'?'讨论概览':'Overview'}</button>`;
+    }
     if (isRunning) {
         btns += `<button onclick="cancelOasisTopic('${detail.topic_id}')" class="oasis-detail-action-btn cancel">⏹ ${t('oasis_cancel')}</button>`;
     }
@@ -3808,6 +3818,250 @@ function toggleConclusionCollapse() {
     const collapsed = textEl.style.display === 'none';
     textEl.style.display = collapsed ? '' : 'none';
     if (toggleEl) toggleEl.textContent = collapsed ? '▼' : '▶';
+}
+
+// ── Discussion Overview: DAG timeline visualization ──
+let _overviewDetailCache = null;
+function cacheOverviewDetail(detail) { _overviewDetailCache = detail; }
+
+function showDiscussionOverview() {
+    const detail = _overviewDetailCache;
+    if (!detail) { alert('No discussion data'); return; }
+    const timeline = detail.timeline || [];
+    const posts = detail.posts || [];
+    if (timeline.length === 0 && posts.length === 0) { alert(currentLang==='zh-CN'?'暂无讨论数据':'No discussion data'); return; }
+
+    // Collect all agents (with agent rows) + system row
+    const agentSet = new Set();
+    timeline.forEach(ev => { if (ev.agent) agentSet.add(ev.agent); });
+    posts.forEach(p => { if (p.author) agentSet.add(p.author); });
+    const agents = [...agentSet];
+    const hasSysEvents = timeline.some(ev => !ev.agent);
+    const rowKeys = [...agents];
+    if (hasSysEvents) rowKeys.push('__system__');
+
+    // Merge all events sorted by time
+    const allEvents = [];
+    timeline.forEach(ev => allEvents.push({ t: ev.elapsed||0, type: 'timeline', data: ev }));
+    posts.forEach(p => allEvents.push({ t: p.elapsed||0, type: 'post', data: p }));
+    allEvents.sort((a,b) => a.t - b.t);
+
+    const maxTime = allEvents.length ? Math.max(allEvents[allEvents.length-1].t, 1) : 1;
+    const fmtT = (s) => { const r=Math.round(s); if(r<60) return r+'s'; return Math.floor(r/60)+'m'+(r%60?r%60+'s':''); };
+
+    // Colors for each event type
+    const evColors = {
+        start:       { bg:'#ecfdf5', border:'#6ee7b7', text:'#047857' },
+        agent_call:  { bg:'#fef3c7', border:'#fcd34d', text:'#92400e' },
+        agent_done:  { bg:'#d1fae5', border:'#6ee7b7', text:'#065f46' },
+        post:        { bg:'#dbeafe', border:'#93c5fd', text:'#1e40af' },
+        conclude:    { bg:'#ede9fe', border:'#c4b5fd', text:'#5b21b6' },
+        round:       { bg:'#fce7f3', border:'#f9a8d4', text:'#9d174d' },
+        if_branch:   { bg:'#fff7ed', border:'#fdba74', text:'#c2410c' },
+        manual_post: { bg:'#e0e7ff', border:'#a5b4fc', text:'#3730a3' },
+    };
+    // Bar colors for duration spans (call→done)
+    const barColors = ['#3b82f6','#8b5cf6','#10b981','#f59e0b','#ef4444','#ec4899','#06b6d4','#84cc16'];
+    const evIcons = {start:'🚀',round:'📢',agent_call:'⏳',agent_done:'✅',conclude:'🏁',manual_post:'📝',if_branch:'🔀',post:'💬'};
+
+    // Layout constants
+    const labelW = 130;    // left label column width
+    const chartW = 700;    // timeline chart width (scrollable)
+    const rowH = 42;       // row height
+    const markerR = 7;     // event marker radius
+    const headerH = 30;    // time axis header height
+
+    // Compute tick marks (aim for ~8-12 ticks)
+    const tickCount = Math.min(Math.max(Math.ceil(maxTime/5), 5), 20);
+    const tickStep = maxTime / tickCount;
+    const niceStep = tickStep < 5 ? 5 : tickStep < 10 ? 10 : tickStep < 15 ? 15 : tickStep < 30 ? 30 : tickStep < 60 ? 60 : Math.ceil(tickStep/60)*60;
+    const ticks = [];
+    for (let t = 0; t <= maxTime + niceStep*0.5; t += niceStep) ticks.push(t);
+
+    const tToX = (t) => (t / maxTime) * chartW;
+
+    // Build per-agent events and duration bars
+    const agentEventsMap = {};
+    const agentBars = {};
+    rowKeys.forEach(k => { agentEventsMap[k] = []; agentBars[k] = []; });
+    allEvents.forEach(ev => {
+        let key;
+        if (ev.type === 'post') key = ev.data.author;
+        else if (ev.data.agent) key = ev.data.agent;
+        else key = '__system__';
+        if (!agentEventsMap[key]) return;
+        agentEventsMap[key].push(ev);
+    });
+
+    // Build duration bars: pair agent_call with agent_done
+    agents.forEach((agent, ai) => {
+        const evs = agentEventsMap[agent];
+        const callStack = [];
+        evs.forEach(ev => {
+            if (ev.type === 'timeline' && ev.data.event === 'agent_call') callStack.push(ev.t);
+            else if (ev.type === 'timeline' && ev.data.event === 'agent_done' && callStack.length > 0) {
+                const startT = callStack.shift();
+                agentBars[agent].push({ start: startT, end: ev.t, color: barColors[ai % barColors.length] });
+            }
+        });
+        // If there are unclosed calls, extend to current max
+        callStack.forEach(st => {
+            agentBars[agent].push({ start: st, end: maxTime, color: barColors[ai % barColors.length], open: true });
+        });
+    });
+
+    // Build SVG for each row
+    function buildRowSvg(key, idx) {
+        const evs = agentEventsMap[key] || [];
+        const bars = agentBars[key] || [];
+        const y = rowH / 2;
+        let svg = '';
+
+        // Background track line
+        svg += `<line x1="0" y1="${y}" x2="${chartW}" y2="${y}" stroke="#e5e7eb" stroke-width="1" stroke-dasharray="4,3"/>`;
+
+        // Duration bars
+        bars.forEach(bar => {
+            const x1 = tToX(bar.start);
+            const x2 = tToX(bar.end);
+            const w = Math.max(x2 - x1, 3);
+            svg += `<rect x="${x1}" y="${y-8}" width="${w}" height="16" rx="4" fill="${bar.color}" opacity="0.18" stroke="${bar.color}" stroke-width="1.5" ${bar.open?'stroke-dasharray="4,2"':''}/>`;
+            svg += `<rect x="${x1}" y="${y-8}" width="${w}" height="16" rx="4" fill="${bar.color}" opacity="0.08"/>`;
+            // Duration label inside bar if wide enough
+            const dur = bar.end - bar.start;
+            if (w > 36) {
+                svg += `<text x="${x1+w/2}" y="${y+3.5}" text-anchor="middle" font-size="8" font-weight="600" fill="${bar.color}" opacity="0.7">${fmtT(dur)}</text>`;
+            }
+        });
+
+        // Event markers (circles with icons)
+        evs.forEach(ev => {
+            const x = tToX(ev.t);
+            const evType = ev.type === 'post' ? 'post' : (ev.data.event || 'start');
+            const col = evColors[evType] || evColors.start;
+            const icon = evIcons[evType] || '⏱';
+
+            // Tooltip text
+            let tip = fmtT(ev.t) + ' ';
+            if (ev.type === 'post') {
+                tip += (currentLang==='zh-CN'?'💬 发言':'💬 Post');
+                const txt = (ev.data.content||'').substring(0,40);
+                if (txt) tip += ': ' + txt;
+            } else {
+                tip += icon + ' ' + (ev.data.detail || ev.data.event || '');
+            }
+
+            // Drop shadow + circle
+            svg += `<circle cx="${x}" cy="${y}" r="${markerR+1}" fill="white" opacity="0.9"/>`;
+            svg += `<circle cx="${x}" cy="${y}" r="${markerR}" fill="${col.bg}" stroke="${col.border}" stroke-width="1.5" style="cursor:pointer;">`;
+            svg += `<title>${escapeHtml(tip)}</title></circle>`;
+            // Icon text (emoji fallback)
+            svg += `<text x="${x}" y="${y+3.5}" text-anchor="middle" font-size="9" style="pointer-events:none;">${icon}</text>`;
+
+            // Time label below marker (only for significant events or sparse areas)
+            svg += `<text x="${x}" y="${y+markerR+10}" text-anchor="middle" font-size="7" fill="#94a3b8">${fmtT(ev.t)}</text>`;
+        });
+
+        return svg;
+    }
+
+    // Build the complete SVG chart
+    const totalH = headerH + rowKeys.length * rowH + 4;
+    let chartSvg = '';
+
+    // Time axis header with ticks
+    chartSvg += `<g transform="translate(0,0)">`;
+    ticks.forEach(t => {
+        const x = tToX(t);
+        if (x > chartW) return;
+        chartSvg += `<line x1="${x}" y1="${headerH-4}" x2="${x}" y2="${totalH}" stroke="#f1f5f9" stroke-width="1"/>`;
+        chartSvg += `<text x="${x}" y="${headerH-8}" text-anchor="middle" font-size="9" fill="#94a3b8" font-weight="500">${fmtT(t)}</text>`;
+    });
+    // Axis baseline
+    chartSvg += `<line x1="0" y1="${headerH}" x2="${chartW}" y2="${headerH}" stroke="#e2e8f0" stroke-width="1.5"/>`;
+    chartSvg += `</g>`;
+
+    // Rows
+    rowKeys.forEach((key, i) => {
+        const yOff = headerH + i * rowH;
+        // Alternating row background
+        if (i % 2 === 0) chartSvg += `<rect x="0" y="${yOff}" width="${chartW}" height="${rowH}" fill="#fafbfc"/>`;
+        // Row separator
+        chartSvg += `<line x1="0" y1="${yOff+rowH}" x2="${chartW}" y2="${yOff+rowH}" stroke="#f1f5f9" stroke-width="1"/>`;
+        chartSvg += `<g transform="translate(0,${yOff})">${buildRowSvg(key, i)}</g>`;
+    });
+
+    // Build left labels HTML
+    let labelsHtml = `<div style="height:${headerH}px;display:flex;align-items:flex-end;padding:0 8px 4px;font-size:9px;font-weight:600;color:#94a3b8;border-bottom:1.5px solid #e2e8f0;">Agent</div>`;
+    rowKeys.forEach((key, i) => {
+        const isSystem = key === '__system__';
+        const name = isSystem ? (currentLang==='zh-CN'?'系统':'System') : key;
+        const icon = isSystem ? '🎯' : getExpertAvatar(key).icon;
+        const bg = i % 2 === 0 ? '#fafbfc' : 'white';
+        labelsHtml += `<div style="height:${rowH}px;display:flex;align-items:center;padding:0 8px;gap:6px;background:${bg};border-bottom:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;">
+            <span style="font-size:13px;flex-shrink:0;">${icon}</span>
+            <span style="font-size:11px;font-weight:600;color:#374151;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
+        </div>`;
+    });
+
+    // Legend
+    const legendItems = [
+        {type:'start', label:currentLang==='zh-CN'?'开始':'Start'},
+        {type:'agent_call', label:currentLang==='zh-CN'?'调用':'Call'},
+        {type:'post', label:currentLang==='zh-CN'?'发言':'Post'},
+        {type:'agent_done', label:currentLang==='zh-CN'?'完成':'Done'},
+        {type:'round', label:currentLang==='zh-CN'?'轮次':'Round'},
+        {type:'conclude', label:currentLang==='zh-CN'?'总结':'Conclude'},
+        {type:'if_branch', label:currentLang==='zh-CN'?'分支':'Branch'},
+    ];
+    const legendHtml = legendItems.map(l => {
+        const c = evColors[l.type]||evColors.start;
+        return `<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:#6b7280;">
+            <span style="width:14px;height:14px;border-radius:50%;background:${c.bg};border:1.5px solid ${c.border};display:inline-flex;align-items:center;justify-content:center;font-size:8px;">${evIcons[l.type]||'⏱'}</span>${l.label}</span>`;
+    }).join('');
+    const barLegend = `<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:#6b7280;margin-left:8px;">
+        <span style="width:24px;height:10px;border-radius:3px;background:${barColors[0]};opacity:0.25;border:1.5px solid ${barColors[0]};display:inline-block;"></span>${currentLang==='zh-CN'?'执行时长':'Duration'}</span>`;
+
+    // Summary stats
+    const totalDuration = allEvents.length ? allEvents[allEvents.length-1].t : 0;
+    const totalPosts = posts.length;
+    const summaryText = currentLang==='zh-CN'
+        ? `共 ${agents.length} 位专家 · ${totalPosts} 条发言 · ${detail.current_round||0} 轮讨论 · 总时长 ${fmtT(Math.round(totalDuration))}`
+        : `${agents.length} experts · ${totalPosts} posts · ${detail.current_round||0} rounds · Duration ${fmtT(Math.round(totalDuration))}`;
+
+    // Create overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'oasis-overview-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;';
+    overlay.innerHTML = `
+        <div style="background:white;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.2);width:94vw;max-width:960px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid #e5e7eb;flex-shrink:0;">
+                <h3 style="font-size:15px;font-weight:700;color:#111827;">📊 ${currentLang==='zh-CN'?'团队讨论时间轴':'Discussion Timeline'}</h3>
+                <button onclick="document.getElementById('oasis-overview-overlay').remove()" style="background:none;border:none;font-size:20px;color:#9ca3af;cursor:pointer;padding:4px 8px;border-radius:6px;line-height:1;">&times;</button>
+            </div>
+            <div style="padding:10px 20px 6px;flex-shrink:0;">
+                <div style="font-size:12px;color:#6b7280;padding:8px 12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">
+                    ${summaryText}
+                </div>
+            </div>
+            <div style="flex:1;overflow:hidden;display:flex;padding:0 20px 10px;">
+                <!-- Left labels (fixed) -->
+                <div style="width:${labelW}px;flex-shrink:0;overflow:hidden;border-right:1.5px solid #e2e8f0;">
+                    ${labelsHtml}
+                </div>
+                <!-- Right chart (horizontally scrollable) -->
+                <div style="flex:1;overflow-x:auto;overflow-y:hidden;">
+                    <svg width="${chartW+20}" height="${totalH}" viewBox="0 0 ${chartW+20} ${totalH}" style="display:block;min-width:${chartW+20}px;">
+                        <g transform="translate(10,0)">${chartSvg}</g>
+                    </svg>
+                </div>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;padding:8px 20px 14px;border-top:1px solid #e5e7eb;flex-shrink:0;align-items:center;">
+                ${legendHtml}${barLegend}
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 }
 
 function fmtElapsed(sec) {
@@ -4290,13 +4544,30 @@ async function loadGroupList() {
 
 function renderGroupList(teams) {
     const container = document.getElementById('group-list');
+    const placeholder = document.getElementById('group-empty-placeholder');
     if (!teams || teams.length === 0) {
         container.innerHTML = `
             <div class="group-empty-state" style="padding:40px 0;">
                 <div class="empty-icon">👥</div>
                 <div class="empty-text">${t('group_no_groups')}</div>
             </div>`;
+        // Update placeholder hint to "create or import"
+        if (placeholder) {
+            const hintEl = placeholder.querySelector('.empty-text');
+            if (hintEl) {
+                hintEl.textContent = t('group_create_hint');
+                hintEl.setAttribute('data-i18n', 'group_create_hint');
+            }
+        }
         return;
+    }
+    // Has teams: restore placeholder hint to "select a team"
+    if (placeholder) {
+        const hintEl = placeholder.querySelector('.empty-text');
+        if (hintEl) {
+            hintEl.textContent = t('group_select_hint');
+            hintEl.setAttribute('data-i18n', 'group_select_hint');
+        }
     }
     container.innerHTML = teams.map(team => {
         const isActive = team === currentGroupId;
@@ -4837,6 +5108,7 @@ async function uploadTeam(input) {
         }
         alert('上传成功！');
         loadGroupList();
+        loadTeamMembers();
     } catch (e) {
         alert('上传失败: ' + e.message);
     }
@@ -5231,6 +5503,9 @@ async function addOasisMember() {
         alert('成员添加成功');
         document.getElementById('add-team-member-overlay').remove();
         loadTeamMembers();
+        // Ensure members overlay stays visible after refresh
+        const membersOverlay = document.getElementById('team-members-overlay');
+        if (membersOverlay) membersOverlay.style.display = 'flex';
     } catch (e) {
         console.error('Failed to add team member:', e);
         alert('添加失败: ' + e.message);
@@ -5294,6 +5569,9 @@ async function addExternalMember() {
         alert('成员添加成功');
         document.getElementById('add-team-member-overlay').remove();
         loadTeamMembers();
+        // Ensure members overlay stays visible after refresh
+        const membersOverlay = document.getElementById('team-members-overlay');
+        if (membersOverlay) membersOverlay.style.display = 'flex';
     } catch (e) {
         console.error('Failed to add external team member:', e);
         alert('添加失败: ' + e.message);
@@ -6067,6 +6345,9 @@ async function addOpenClawMember() {
             alert('🦞 OpenClaw Agent创建成功！');
             overlay.remove();
             loadTeamMembers();
+            // Ensure members overlay stays visible after refresh
+            const membersOverlay = document.getElementById('team-members-overlay');
+            if (membersOverlay) membersOverlay.style.display = 'flex';
 
             // Auto-open the full config modal (files/tools/channels) for the new agent
             setTimeout(() => orchShowAgentConfigModal(globalName), 500);
@@ -6184,6 +6465,9 @@ async function _doImportOasis() {
         alert('✅ Internal Agent 已导入团队');
         document.getElementById('import-oasis-overlay').remove();
         loadTeamMembers();
+        // Ensure members overlay stays visible after refresh
+        const membersOverlay = document.getElementById('team-members-overlay');
+        if (membersOverlay) membersOverlay.style.display = 'flex';
     } catch (e) {
         console.error('Failed to import oasis agent:', e);
         alert('导入失败: ' + e.message);
@@ -6298,6 +6582,9 @@ async function _doImportOpenClaw() {
         alert('🦞 OpenClaw Agent 已导入团队');
         document.getElementById('import-oc-overlay').remove();
         loadTeamMembers();
+        // Ensure members overlay stays visible after refresh
+        const membersOverlay = document.getElementById('team-members-overlay');
+        if (membersOverlay) membersOverlay.style.display = 'flex';
     } catch (e) {
         console.error('Failed to import openclaw agent:', e);
         alert('导入失败: ' + e.message);

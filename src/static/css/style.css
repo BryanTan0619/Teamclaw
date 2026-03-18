@@ -196,6 +196,8 @@ header {
 .oasis-detail-action-btn.cancel:hover { background: #fffbeb; }
 .oasis-detail-action-btn.delete { color: #dc2626; border-color: #fca5a5; }
 .oasis-detail-action-btn.delete:hover { background: #fef2f2; }
+.oasis-detail-action-btn.overview { color: #2563eb; border-color: #93c5fd; background: linear-gradient(135deg,#eff6ff,#dbeafe); font-weight: 600; }
+.oasis-detail-action-btn.overview:hover { background: linear-gradient(135deg,#dbeafe,#bfdbfe); }
 .oasis-status-error { background: #fee2e2; color: #991b1b; }
 @keyframes pulse-bg { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
 .oasis-expert-avatar { width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; color: white; flex-shrink: 0; }
@@ -206,6 +208,8 @@ header {
 .expert-default { background: linear-gradient(135deg, #6b7280, #4b5563); }
 .oasis-discussion-box { height: calc(100vh - 340px); overflow-y: auto; }
 .oasis-conclusion-box { background: linear-gradient(135deg, #f0fdf4, #ecfdf5); border: 1px solid #86efac; border-radius: 12px; padding: 12px; }
+.oasis-overview-btn{font-size:10px;padding:3px 8px;border-radius:6px;cursor:pointer;background:linear-gradient(135deg,#eff6ff,#dbeafe);color:#2563eb;border:1px solid #93c5fd;font-weight:600;white-space:nowrap;transition:all .15s}
+.oasis-overview-btn:hover{background:linear-gradient(135deg,#dbeafe,#bfdbfe)}
 
 /* === Page Switch Tab === */
 .page-tab-bar {
